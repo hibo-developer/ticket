@@ -140,6 +140,8 @@ create or replace function public.current_org_id()
 returns uuid
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select p.org_id from public.profiles p where p.id = auth.uid()
 $$;
@@ -148,6 +150,8 @@ create or replace function public.is_admin()
 returns boolean
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select coalesce((p.app_role = 'admin') and p.active, false) from public.profiles p where p.id = auth.uid()
 $$;
@@ -179,7 +183,13 @@ create policy organizations_insert
 on public.organizations
 for insert
 to authenticated
-with check (true);
+with check (
+  not exists (
+    select 1
+    from public.profiles p
+    where p.id = auth.uid()
+  )
+);
 
 create policy profiles_select_self
 on public.profiles
@@ -326,6 +336,7 @@ create or replace function public.current_org_prefix()
 returns text
 language sql
 stable
+set search_path = public
 as $$
   select 'org_' || public.current_org_id()::text
 $$;
