@@ -3,9 +3,12 @@ import { supabase } from '@/core/auth/supabaseClient'
 import { appendAudit } from '@/core/audit/audit'
 import { sanitizeFilename } from '@/core/files/sanitize'
 import { sha256HexFile } from '@/core/files/sha256'
+import { runReceiptOcr } from '@/core/ocr/receiptOcr'
 import { signDownloadUrl } from '@/core/storage/signedUrls'
 import { Permission } from '@/core/rbac/permissions'
 import { usePermissions } from '@/core/rbac/usePermissions'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import { TicketFilesCard } from '@/modules/tickets/components/TicketFilesCard'
 import type { Ticket, TicketFile } from '@/modules/tickets/types'
 import { useEffect, useMemo, useState } from 'react'
@@ -31,6 +34,11 @@ export default function TicketDetail() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [form, setForm] = useState({ title: '', vendor: '', ticket_date: '', amount: '' })
+  const [saving, setSaving] = useState(false)
+  const [ocrRunning, setOcrRunning] = useState(false)
+  const [ocrProgress, setOcrProgress] = useState(0)
+  const [ocrInfo, setOcrInfo] = useState<string | null>(null)
 
   const canWrite = permissions.has(Permission.TicketsWrite)
   const canDownload = permissions.has(Permission.TicketsDownload)
@@ -78,6 +86,16 @@ export default function TicketDetail() {
     load()
   }, [id, profile?.org_id])
 
+  useEffect(() => {
+    if (!ticket) return
+    setForm({
+      title: ticket.title ?? '',
+      vendor: ticket.vendor ?? '',
+      ticket_date: ticket.ticket_date ?? '',
+      amount: ticket.amount != null ? String(ticket.amount) : '',
+    })
+  }, [ticket?.id])
+
   const subtitle = useMemo(() => {
     if (!ticket) return ''
     const parts = []
@@ -102,8 +120,39 @@ export default function TicketDetail() {
 
     setBusy(true)
     setError(null)
+    setOcrInfo(null)
 
     try {
+      if (file.type.startsWith('image/')) {
+        setOcrRunning(true)
+        setOcrProgress(0)
+        try {
+          const ocr = await runReceiptOcr(file, {
+            onProgress: (p) => setOcrProgress(Math.max(0, Math.min(1, p))),
+          })
+
+          setForm((prev) => ({
+            ...prev,
+            vendor: prev.vendor.trim() ? prev.vendor : ocr.vendor ?? prev.vendor,
+            ticket_date: prev.ticket_date ? prev.ticket_date : ocr.date ?? prev.ticket_date,
+            amount: prev.amount.trim() ? prev.amount : ocr.total != null ? ocr.total.toFixed(2) : prev.amount,
+            title: prev.title.trim()
+              ? prev.title
+              : ocr.vendor
+                ? ocr.vendor
+                : ocr.date
+                  ? `Ticket ${ocr.date}`
+                  : prev.title,
+          }))
+
+          setOcrInfo('Datos extraídos del ticket. Revisa y guarda si hace falta.')
+        } catch (e: any) {
+          setOcrInfo(e?.message ? `OCR: ${e.message}` : 'OCR: no se pudo procesar la imagen.')
+        } finally {
+          setOcrRunning(false)
+        }
+      }
+
       const sha256 = await sha256HexFile(file)
       const safeName = sanitizeFilename(file.name)
       const objectPath = `org_${profile.org_id}/tickets/${id}/${crypto.randomUUID()}-${safeName}`
@@ -143,6 +192,51 @@ export default function TicketDetail() {
     } finally {
       setBusy(false)
     }
+  }
+
+  const save = async () => {
+    if (!id || !profile?.org_id) return
+    if (!canWrite) return
+
+    const title = form.title.trim()
+    if (!title) {
+      setError('El título es obligatorio.')
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+
+    const parsedAmount = form.amount.trim() ? Number(form.amount) : null
+    const amount = parsedAmount !== null && Number.isFinite(parsedAmount) ? parsedAmount : null
+
+    const res = await supabase
+      .from('tickets')
+      .update({
+        title,
+        vendor: form.vendor.trim() ? form.vendor.trim() : null,
+        ticket_date: form.ticket_date ? form.ticket_date : null,
+        amount,
+      })
+      .eq('id', id)
+      .eq('org_id', profile.org_id)
+
+    setSaving(false)
+
+    if (res.error) {
+      setError(res.error.message)
+      return
+    }
+
+    await appendAudit({
+      org_id: profile.org_id,
+      action: 'TICKET_UPDATE',
+      resource_type: 'ticket',
+      resource_id: id,
+      metadata: { title, vendor: form.vendor.trim() || null, ticket_date: form.ticket_date || null, amount },
+    })
+
+    await load()
   }
 
   const download = async (f: TicketFile) => {
@@ -217,12 +311,44 @@ export default function TicketDetail() {
         </div>
       </div>
 
+      <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <div className="text-sm font-medium text-zinc-900">Datos</div>
+            <div className="mt-1 text-sm text-zinc-600">Puedes completar o corregir los datos detectados por OCR.</div>
+          </div>
+          <Button type="button" onClick={save} disabled={!canWrite || saving || busy || ocrRunning}>
+            {saving ? 'Guardando…' : 'Guardar'}
+          </Button>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+          <Input value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} placeholder="Título" />
+          <Input value={form.vendor} onChange={(e) => setForm((p) => ({ ...p, vendor: e.target.value }))} placeholder="Establecimiento" />
+          <Input type="date" value={form.ticket_date} onChange={(e) => setForm((p) => ({ ...p, ticket_date: e.target.value }))} />
+          <Input
+            inputMode="decimal"
+            value={form.amount}
+            onChange={(e) => setForm((p) => ({ ...p, amount: e.target.value }))}
+            placeholder="Importe total"
+          />
+        </div>
+
+        {ocrRunning ? (
+          <div className="mt-3 text-xs text-zinc-500">OCR: {Math.round(ocrProgress * 100)}%</div>
+        ) : ocrInfo ? (
+          <div className="mt-3 text-xs text-zinc-600">{ocrInfo}</div>
+        ) : null}
+
+        {error ? <div className="mt-3 text-sm text-rose-600">{error}</div> : null}
+      </div>
+
       <TicketFilesCard
         files={files}
         busy={busy}
         canWrite={canWrite}
         canDownload={canDownload}
-        error={error}
+        error={null}
         onUpload={onUpload}
         onDownload={download}
       />

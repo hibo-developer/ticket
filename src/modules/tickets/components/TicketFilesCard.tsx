@@ -22,21 +22,41 @@ export function TicketFilesCard({
     <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
       <div className="flex items-center justify-between">
         <div className="text-sm font-medium text-zinc-900">Adjuntos</div>
-        <label className="inline-flex cursor-pointer items-center gap-2">
-          <input
-            className="hidden"
-            type="file"
-            onChange={(e) => {
-              const f = e.target.files?.[0]
-              if (f) onUpload(f)
-              e.currentTarget.value = ''
-            }}
-            disabled={!canWrite || busy}
-          />
-          <Button type="button" disabled={!canWrite || busy}>
-            {busy ? 'Procesando…' : 'Subir archivo'}
-          </Button>
-        </label>
+        <div className="flex items-center gap-2">
+          <label className="inline-flex cursor-pointer items-center gap-2">
+            <input
+              className="hidden"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) onUpload(f)
+                e.currentTarget.value = ''
+              }}
+              disabled={!canWrite || busy}
+            />
+            <Button type="button" disabled={!canWrite || busy}>
+              {busy ? 'Procesando…' : 'Capturar foto'}
+            </Button>
+          </label>
+
+          <label className="inline-flex cursor-pointer items-center gap-2">
+            <input
+              className="hidden"
+              type="file"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) onUpload(f)
+                e.currentTarget.value = ''
+              }}
+              disabled={!canWrite || busy}
+            />
+            <Button type="button" disabled={!canWrite || busy}>
+              {busy ? 'Procesando…' : 'Subir archivo'}
+            </Button>
+          </label>
+        </div>
       </div>
 
       {error ? <div className="mt-3 text-sm text-rose-600">{error}</div> : null}

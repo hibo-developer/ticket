@@ -97,7 +97,8 @@ describe('TicketDetail', () => {
 
     expect(await screen.findByText('Ticket demo')).toBeInTheDocument()
 
-    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    const inputs = container.querySelectorAll('input[type="file"]')
+    const input = inputs[inputs.length - 1] as HTMLInputElement
     await user.upload(input, file)
 
     await waitFor(() => expect(mocks.upload).toHaveBeenCalled())

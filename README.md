@@ -40,6 +40,22 @@ npm run dev
    - Activa/desactiva módulos.
    - Crea roles y asigna permisos a cada rol.
 
+## Captura de tickets + OCR (móvil)
+En el detalle de un ticket (`/tickets/:id`) se pueden adjuntar imágenes del ticket desde la cámara y autocompletar datos mediante OCR:
+- Botón “Capturar foto” (móvil): abre la cámara del dispositivo (cuando el navegador lo soporta).
+- OCR en cliente (Tesseract): extrae y propone `fecha`, `importe total` y `establecimiento`.
+- Los datos se rellenan en el formulario de “Datos” y el usuario puede corregirlos antes de guardar.
+
+Notas:
+- La precisión del OCR depende del ticket (contraste, arrugas, iluminación, idioma).
+- La primera ejecución puede descargar datos de idioma del OCR.
+
+## Descarga/compartir imágenes (alta resolución)
+En la lista de tickets (`/tickets`) se puede:
+- Seleccionar uno o varios tickets.
+- Descargar un ZIP con las imágenes originales (sin recomprimir).
+- Compartir desde móvil (Web Share) si el navegador lo soporta; si se seleccionan varias imágenes, se comparte un ZIP.
+
 ### Configuración necesaria en Supabase Auth
 Para que el primer usuario pueda registrarse correctamente, revisa estas opciones en el panel de Supabase:
 - Auth > Settings > Email auth: activa el flujo de email y confirma que el proveedor de correo esté configurado.
@@ -47,6 +63,13 @@ Para que el primer usuario pueda registrarse correctamente, revisa estas opcione
 - Auth > Settings > URL Configuration: añade `http://localhost:5173` para desarrollo y `https://ticket-cotepa.netlify.app` a la lista de `Redirect URLs`.
 - Auth > Settings > User signups: asegúrate de que el registro de usuarios esté permitido.
 - Si ves errores 400/429 al enviar el enlace mágico, la app intentará usar la Edge Function `auth-create-user`; si esa ruta falla, revisa el panel y el log de la función.
+
+## Seguridad (imágenes y datos)
+- Storage: bucket privado `tickets-cotepa` con políticas por organización (prefijo `org_<org_id>`).
+- Acceso a descargas: se usan signed URLs temporales vía Edge Function (`storage-sign-download`) y auditoría.
+- Transporte: HTTPS (Netlify/Supabase) + tokens de Supabase en cabeceras.
+- Cifrado en reposo: Supabase cifra el almacenamiento en reposo a nivel de infraestructura; evita almacenar datos sensibles en metadatos/URLs.
+- OCR: se ejecuta en el cliente (no envía imágenes a terceros).
 
 ## Tests
 ```bash
