@@ -4,13 +4,16 @@ import { useAuth } from '@/core/auth/AuthContext'
 import { supabase } from '@/core/auth/supabaseClient'
 import { appendAudit } from '@/core/audit/audit'
 import { downloadBlob } from '@/core/files/download'
+import { sanitizeFilename } from '@/core/files/sanitize'
+import { sha256HexFile } from '@/core/files/sha256'
 import { createZipBlob } from '@/core/files/zip'
+import { runReceiptOcr } from '@/core/ocr/receiptOcr'
 import { usePermissions } from '@/core/rbac/usePermissions'
 import { Permission } from '@/core/rbac/permissions'
 import { signDownloadUrl } from '@/core/storage/signedUrls'
 import { useViewLayout } from '@/core/views/useViewLayout'
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 type TicketRow = {
   id: string
@@ -33,16 +36,28 @@ type TicketFileRow = {
   sha256: string
 }
 
+const MAX_BYTES = 15 * 1024 * 1024
+
+function isAllowedType(file: File) {
+  if (file.type === 'application/pdf') return true
+  if (file.type.startsWith('image/')) return true
+  if (file.type === 'text/xml') return true
+  if (file.type === 'application/xml') return true
+  return false
+}
+
 export default function TicketsList() {
   const { profile, session } = useAuth()
   const { permissions } = usePermissions()
   const { layout: formLayout } = useViewLayout('tickets.form')
   const { layout: listLayout } = useViewLayout('tickets.list')
+  const navigate = useNavigate()
 
   const [form, setForm] = useState({ title: '', vendor: '', amount: '' })
   const [rows, setRows] = useState<TicketRow[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
+  const [captureBusy, setCaptureBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [exporting, setExporting] = useState(false)
@@ -111,12 +126,108 @@ export default function TicketsList() {
     await load()
   }
 
+  const createFromCapturedFile = async (file: File) => {
+    if (!profile?.org_id || !session?.user) return
+    if (!canWrite) return
+
+    if (file.size > MAX_BYTES) {
+      setError(`El archivo supera el límite (${Math.round(MAX_BYTES / (1024 * 1024))}MB).`)
+      return
+    }
+
+    if (!isAllowedType(file)) {
+      setError('Formato no permitido. Admite PDF, imágenes y XML.')
+      return
+    }
+
+    setCaptureBusy(true)
+    setError(null)
+
+    try {
+      let ocr: Awaited<ReturnType<typeof runReceiptOcr>> | null = null
+
+      if (file.type.startsWith('image/')) {
+        try {
+          ocr = await runReceiptOcr(file)
+        } catch {
+          ocr = null
+        }
+      }
+
+      const title =
+        ocr?.vendor?.trim() ||
+        (ocr?.date ? `Ticket ${ocr.date}` : '') ||
+        file.name.replace(/\.[^.]+$/, '') ||
+        'Ticket'
+
+      const ticketRes = await supabase
+        .from('tickets')
+        .insert({
+          org_id: profile.org_id,
+          owner_user_id: session.user.id,
+          title,
+          vendor: ocr?.vendor?.trim() || null,
+          ticket_date: ocr?.date || null,
+          amount: ocr?.total ?? null,
+          currency: 'EUR',
+          status: 'draft',
+        })
+        .select('id')
+        .single()
+
+      if (ticketRes.error) throw ticketRes.error
+
+      const ticketId = ticketRes.data?.id
+      if (!ticketId) throw new Error('No se pudo crear el ticket.')
+
+      const sha256 = await sha256HexFile(file)
+      const safeName = sanitizeFilename(file.name)
+      const objectPath = `org_${profile.org_id}/tickets/${ticketId}/${crypto.randomUUID()}-${safeName}`
+      const bucket = 'tickets-cotepa'
+
+      const up = await supabase.storage.from(bucket).upload(objectPath, file, {
+        upsert: false,
+        contentType: file.type || undefined,
+      })
+
+      if (up.error) throw up.error
+
+      const ins = await supabase.from('ticket_files').insert({
+        org_id: profile.org_id,
+        ticket_id: ticketId,
+        filename: safeName,
+        mimetype: file.type || null,
+        byte_size: file.size,
+        storage_bucket: bucket,
+        storage_path: objectPath,
+        sha256,
+      })
+
+      if (ins.error) throw ins.error
+
+      await appendAudit({
+        org_id: profile.org_id,
+        action: 'TICKET_FILE_UPLOAD',
+        resource_type: 'ticket',
+        resource_id: ticketId,
+        metadata: { filename: safeName, sha256, byte_size: file.size, mimetype: file.type, created_from: 'tickets_list' },
+      })
+
+      await load()
+      navigate(`/tickets/${ticketId}`)
+    } catch (e: any) {
+      setError(e?.message ?? 'No se pudo capturar el ticket.')
+    } finally {
+      setCaptureBusy(false)
+    }
+  }
+
   const visibleColumns = listLayout.fields.filter((f) => f.visible !== false)
   const canShare = typeof navigator !== 'undefined' && 'share' in navigator
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="text-sm text-zinc-500">Tickets</div>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">Tickets y recibos</h1>
@@ -124,7 +235,29 @@ export default function TicketsList() {
       </div>
 
       <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-        <div className="text-sm font-medium text-zinc-900">Crear ticket</div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-sm font-medium text-zinc-900">Crear ticket</div>
+            <div className="mt-1 text-sm text-zinc-600">También puedes sacar la foto del ticket directamente desde aquí.</div>
+          </div>
+          <label className="flex w-full cursor-pointer sm:w-auto">
+            <input
+              className="hidden"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) void createFromCapturedFile(f)
+                e.currentTarget.value = ''
+              }}
+              disabled={!canWrite || captureBusy || creating}
+            />
+            <Button type="button" className="w-full sm:w-auto" disabled={!canWrite || captureBusy || creating}>
+              {captureBusy ? 'Procesando foto…' : 'Capturar ticket'}
+            </Button>
+          </label>
+        </div>
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-4">
           {formLayout.fields
             .filter((f) => f.visible !== false)
@@ -168,7 +301,12 @@ export default function TicketsList() {
               }
               return null
             })}
-          <Button type="button" onClick={createTicket} disabled={!canWrite || creating || !form.title.trim()}>
+          <Button
+            type="button"
+            className="w-full md:w-auto"
+            onClick={createTicket}
+            disabled={!canWrite || creating || captureBusy || !form.title.trim()}
+          >
             {creating ? 'Creando…' : 'Crear'}
           </Button>
         </div>
@@ -178,10 +316,11 @@ export default function TicketsList() {
       <div className="rounded-2xl border border-zinc-200 bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 md:flex-row md:items-center md:justify-between">
           <div className="text-sm font-medium text-zinc-900">Últimos tickets</div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <Button
               type="button"
               variant="ghost"
+              className="w-full sm:w-auto"
               disabled={!canDownload || exporting || selected.size === 0}
               onClick={async () => {
                 if (!profile?.org_id) return
@@ -248,6 +387,7 @@ export default function TicketsList() {
               <Button
                 type="button"
                 variant="ghost"
+                className="w-full sm:w-auto"
                 disabled={!canDownload || exporting || selected.size === 0}
                 onClick={async () => {
                   if (!profile?.org_id) return

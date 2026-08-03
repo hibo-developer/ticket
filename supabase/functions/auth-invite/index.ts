@@ -21,6 +21,30 @@ function normalizeEmail(email: string) {
   return email.trim().toLowerCase()
 }
 
+function mapInviteError(error: { message?: string; status?: number | string } | null | undefined) {
+  const rawMessage = error?.message ?? 'Invite failed'
+  const message = rawMessage.toLowerCase()
+  const status = typeof error?.status === 'string' ? Number(error.status) : error?.status
+
+  if (message.includes('redirect') || message.includes('not allowed') || message.includes('site url')) {
+    return { status: 400, error: 'Invalid redirect URL configuration' }
+  }
+
+  if (message.includes('already') || message.includes('exists') || message.includes('invited')) {
+    return { status: 409, error: 'User already invited or already exists' }
+  }
+
+  if (status === 400 || message.includes('invalid email')) {
+    return { status: 400, error: 'Invalid email' }
+  }
+
+  if (status === 401 || status === 403) {
+    return { status: 403, error: 'Forbidden' }
+  }
+
+  return { status: 500, error: rawMessage }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return json(200, { ok: true })
   if (req.method !== 'POST') return json(405, { error: 'Method not allowed' })
@@ -45,7 +69,13 @@ Deno.serve(async (req) => {
   if (meError || !me?.org_id) return json(403, { error: 'Forbidden' })
   if (!me.active || me.app_role !== 'admin') return json(403, { error: 'Forbidden' })
 
-  const input = (await req.json()) as Input
+  let input: Input
+  try {
+    input = (await req.json()) as Input
+  } catch {
+    return json(400, { error: 'Invalid request body' })
+  }
+
   const email = normalizeEmail(input?.email ?? '')
   const redirectTo = input?.redirectTo?.trim()
   if (!email || !email.includes('@')) return json(400, { error: 'Invalid email' })
@@ -61,9 +91,12 @@ Deno.serve(async (req) => {
     },
   })
 
-  if (inviteRes.error) return json(500, { error: inviteRes.error.message })
+  if (inviteRes.error) {
+    const mapped = mapInviteError(inviteRes.error)
+    return json(mapped.status, { error: mapped.error })
+  }
 
-  await serviceClient.from('audit_log').insert({
+  const auditRes = await serviceClient.from('audit_log').insert({
     org_id: me.org_id,
     actor_user_id: userId,
     action: 'USER_INVITE',
@@ -71,6 +104,10 @@ Deno.serve(async (req) => {
     resource_id: inviteRes.data.user?.id ?? null,
     metadata: { email },
   })
+
+  if (auditRes.error) {
+    console.error('auth-invite audit_log insert failed', auditRes.error)
+  }
 
   return json(200, { ok: true, user_id: inviteRes.data.user?.id ?? null })
 })

@@ -298,7 +298,7 @@ export default function TicketDetail() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="text-sm text-zinc-500">
             <Link className="hover:underline" to="/tickets">
@@ -312,12 +312,17 @@ export default function TicketDetail() {
       </div>
 
       <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="text-sm font-medium text-zinc-900">Datos</div>
             <div className="mt-1 text-sm text-zinc-600">Puedes completar o corregir los datos detectados por OCR.</div>
           </div>
-          <Button type="button" onClick={save} disabled={!canWrite || saving || busy || ocrRunning}>
+          <Button
+            type="button"
+            className="w-full sm:w-auto"
+            onClick={save}
+            disabled={!canWrite || saving || busy || ocrRunning}
+          >
             {saving ? 'Guardando…' : 'Guardar'}
           </Button>
         </div>

@@ -9,10 +9,43 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { profile, signOut } = useAuth()
   const { navItems } = useNavigation()
   const location = useLocation()
+  const activeItem = navItems.find((item) => location.pathname === item.path || location.pathname.startsWith(`${item.path}/`))
 
   return (
     <div className="min-h-screen bg-zinc-50">
-      <div className="mx-auto flex w-full max-w-7xl gap-6 px-4 py-6 md:px-6">
+      <div className="border-b border-zinc-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur md:hidden">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-xs text-zinc-500">Tickets Cotepa</div>
+            <div className="truncate text-base font-semibold text-zinc-900">{activeItem?.label ?? 'Panel'}</div>
+          </div>
+          <Button type="button" variant="ghost" size="sm" className="shrink-0" onClick={() => signOut()}>
+            <LogOut className="mr-2 h-4 w-4" />
+            Salir
+          </Button>
+        </div>
+
+        <nav className="-mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1">
+          {navItems.map((item) => {
+            const active = location.pathname === item.path || location.pathname.startsWith(`${item.path}/`)
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                className={cn(
+                  'inline-flex min-h-[44px] shrink-0 items-center gap-2 rounded-xl px-3 text-sm font-medium transition-colors',
+                  active ? 'bg-zinc-900 text-white' : 'border border-zinc-200 bg-white text-zinc-700',
+                )}
+              >
+                <item.icon className={cn('h-4 w-4', active ? 'text-white' : 'text-zinc-500')} />
+                <span>{item.label}</span>
+              </Link>
+            )
+          })}
+        </nav>
+      </div>
+
+      <div className="mx-auto flex w-full max-w-7xl gap-6 px-4 py-4 md:px-6 md:py-6">
         <aside className="hidden w-64 flex-none md:block">
           <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between">
@@ -56,7 +89,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </aside>
 
-        <main className="min-w-0 flex-1">{children}</main>
+        <main className="min-w-0 flex-1 pb-6">{children}</main>
       </div>
     </div>
   )

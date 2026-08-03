@@ -20,10 +20,10 @@ export function TicketFilesCard({
 }) {
   return (
     <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="text-sm font-medium text-zinc-900">Adjuntos</div>
-        <div className="flex items-center gap-2">
-          <label className="inline-flex cursor-pointer items-center gap-2">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+          <label className="flex w-full cursor-pointer items-center gap-2 sm:w-auto">
             <input
               className="hidden"
               type="file"
@@ -36,12 +36,12 @@ export function TicketFilesCard({
               }}
               disabled={!canWrite || busy}
             />
-            <Button type="button" disabled={!canWrite || busy}>
+            <Button type="button" className="w-full sm:w-auto" disabled={!canWrite || busy}>
               {busy ? 'Procesando…' : 'Capturar foto'}
             </Button>
           </label>
 
-          <label className="inline-flex cursor-pointer items-center gap-2">
+          <label className="flex w-full cursor-pointer items-center gap-2 sm:w-auto">
             <input
               className="hidden"
               type="file"
@@ -52,7 +52,7 @@ export function TicketFilesCard({
               }}
               disabled={!canWrite || busy}
             />
-            <Button type="button" disabled={!canWrite || busy}>
+            <Button type="button" className="w-full sm:w-auto" disabled={!canWrite || busy}>
               {busy ? 'Procesando…' : 'Subir archivo'}
             </Button>
           </label>
