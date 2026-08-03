@@ -15,6 +15,7 @@ vi.mock('@/core/auth/supabaseClient', () => {
   }
 
   return {
+    supabaseReady: true,
     supabase: {
       auth: {
         getSession: vi.fn().mockResolvedValue({ data: { session } }),

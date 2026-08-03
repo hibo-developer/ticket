@@ -12,6 +12,7 @@ PWA empresarial modular para gestionar tickets/recibos y gastos con adjuntos, pe
    - Rellena:
      - `VITE_SUPABASE_URL`
      - `VITE_SUPABASE_ANON_KEY`
+     - `VITE_AUTH_REDIRECT_URL` (en producción: `https://ticket-cotepa.netlify.app`)
 2. Crea el esquema en Supabase:
    - Ejecuta el SQL de [20260731_000001_init.sql](file:///c:/Oddo/supabase/migrations/20260731_000001_init.sql) en el SQL editor de Supabase.
 3. Crea el bucket y políticas:
@@ -42,7 +43,8 @@ npm run dev
 ### Configuración necesaria en Supabase Auth
 Para que el primer usuario pueda registrarse correctamente, revisa estas opciones en el panel de Supabase:
 - Auth > Settings > Email auth: activa el flujo de email y confirma que el proveedor de correo esté configurado.
-- Auth > Settings > URL Configuration: define `http://localhost:5173` como redirect URL de desarrollo y añade también la URL real del despliegue si aplica.
+- Auth > Settings > URL Configuration: define `Site URL` como `https://ticket-cotepa.netlify.app` en producción.
+- Auth > Settings > URL Configuration: añade `http://localhost:5173` para desarrollo y `https://ticket-cotepa.netlify.app` a la lista de `Redirect URLs`.
 - Auth > Settings > User signups: asegúrate de que el registro de usuarios esté permitido.
 - Si ves errores 400/429 al enviar el enlace mágico, la app intentará usar la Edge Function `auth-create-user`; si esa ruta falla, revisa el panel y el log de la función.
 

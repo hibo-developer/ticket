@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.0'
 type Input = {
   email: string
   full_name?: string
+  redirectTo?: string
 }
 
 function json(status: number, body: unknown) {
@@ -46,11 +47,13 @@ Deno.serve(async (req) => {
 
   const input = (await req.json()) as Input
   const email = normalizeEmail(input?.email ?? '')
+  const redirectTo = input?.redirectTo?.trim()
   if (!email || !email.includes('@')) return json(400, { error: 'Invalid email' })
 
   const serviceClient = createClient(supabaseUrl, serviceKey)
 
   const inviteRes = await serviceClient.auth.admin.inviteUserByEmail(email, {
+    redirectTo: redirectTo || undefined,
     data: {
       org_id: me.org_id,
       full_name: (input.full_name ?? '').trim() || null,

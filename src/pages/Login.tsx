@@ -1,5 +1,6 @@
 import { supabase } from '@/core/auth/supabaseClient'
 import { useAuth } from '@/core/auth/AuthContext'
+import { getAuthRedirectUrl } from '@/core/auth/redirect'
 import { useEffect, useState } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 
@@ -11,6 +12,7 @@ export default function Login() {
   const { session } = useAuth()
   const location = useLocation()
   const from = (location.state as any)?.from ?? '/'
+  const authRedirectUrl = getAuthRedirectUrl()
 
   const [mode, setMode] = useState<'login' | 'signup'>('login')
   const [email, setEmail] = useState('')
@@ -59,7 +61,7 @@ export default function Login() {
             try {
               const { error: otpError } = await supabase.auth.signInWithOtp({
                 email,
-                options: { emailRedirectTo: window.location.origin },
+                options: { emailRedirectTo: authRedirectUrl },
               })
               if (otpError) {
                 const otpMessage = otpError.message?.toLowerCase() ?? ''
@@ -89,7 +91,7 @@ export default function Login() {
         try {
           const { error: otpError } = await supabase.auth.signInWithOtp({
             email,
-            options: { emailRedirectTo: window.location.origin },
+            options: { emailRedirectTo: authRedirectUrl },
           })
           if (otpError) {
             const otpMessage = otpError.message?.toLowerCase() ?? ''
