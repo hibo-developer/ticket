@@ -10,7 +10,7 @@ import Reports from '@/modules/reports/pages/Reports'
 import TicketDetail from '@/modules/tickets/pages/TicketDetail'
 import TicketsList from '@/modules/tickets/pages/TicketsList'
 import { AllPermissions } from '@/core/rbac/permissions'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
@@ -82,6 +82,7 @@ const supabaseMock = vi.hoisted(() => {
       getSession: vi.fn().mockResolvedValue({ data: { session: authStateRef.current.session } }),
       onAuthStateChange: vi.fn().mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } }),
       signInWithPassword: vi.fn().mockResolvedValue({ error: null }),
+      signInWithOtp: vi.fn().mockResolvedValue({ error: null }),
       signUp: vi.fn().mockResolvedValue({ error: null }),
       signOut: vi.fn().mockResolvedValue({ error: null }),
       getUser: vi.fn().mockResolvedValue({ data: { user: authStateRef.current.session.user } }),
@@ -142,6 +143,64 @@ describe('smoke', () => {
       </MemoryRouter>,
     )
     expect(screen.getByText('Acceso seguro a tickets y gastos')).toBeInTheDocument()
+  })
+
+  it('muestra un mensaje claro cuando Supabase rechaza el login por configuración de auth', async () => {
+    authStateRef.current = { ...authStateRef.current, session: null, profile: null }
+    supabaseMock.auth.signInWithPassword.mockResolvedValueOnce({ error: { message: 'Auth is disabled' } })
+    supabaseMock.auth.signInWithOtp.mockResolvedValueOnce({ error: { message: 'Auth is disabled' } })
+
+    render(
+      <MemoryRouter>
+        <Login />
+      </MemoryRouter>,
+    )
+
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'user@test.local' } })
+    fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Entrar con email' }))
+
+    expect(await screen.findByText(/La autenticación por correo/i)).toBeInTheDocument()
+  })
+
+  it('envía un enlace mágico cuando la contraseña no está disponible', async () => {
+    authStateRef.current = { ...authStateRef.current, session: null, profile: null }
+    supabaseMock.auth.signInWithPassword.mockResolvedValueOnce({ error: { message: 'Auth is disabled' } })
+    supabaseMock.auth.signInWithOtp.mockResolvedValueOnce({ error: null })
+
+    render(
+      <MemoryRouter>
+        <Login />
+      </MemoryRouter>,
+    )
+
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'user@test.local' } })
+    fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Entrar con email' }))
+
+    expect(await screen.findByText(/hemos enviado un enlace/i)).toBeInTheDocument()
+  })
+
+  it('usa un enlace mágico para el acceso cuando se intenta crear cuenta', async () => {
+    authStateRef.current = { ...authStateRef.current, session: null, profile: null }
+    supabaseMock.auth.signInWithOtp.mockResolvedValueOnce({ error: null })
+    supabaseMock.auth.signUp.mockReset()
+    supabaseMock.auth.signInWithPassword.mockReset()
+
+    render(
+      <MemoryRouter>
+        <Login />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }))
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'user@test.local' } })
+    fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: /enviar enlace mágico/i }))
+
+    expect(await screen.findByText(/enlace mágico/i)).toBeInTheDocument()
+    expect(supabaseMock.auth.signUp).not.toHaveBeenCalled()
+    expect(supabaseMock.auth.signInWithOtp).toHaveBeenCalled()
   })
 
   it('renderiza Setup cuando falta profile', () => {

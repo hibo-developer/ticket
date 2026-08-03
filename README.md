@@ -21,7 +21,7 @@ PWA empresarial modular para gestionar tickets/recibos y gastos con adjuntos, pe
    - Variables requeridas en Supabase Functions:
      - `SUPABASE_URL`
      - `SUPABASE_ANON_KEY`
-     - `SUPABASE_SERVICE_ROLE_KEY`
+     - `SERVICE_ROLE_KEY`
 
 ## Arranque
 ```bash

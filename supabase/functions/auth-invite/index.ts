@@ -1,10 +1,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.0'
 
 type Input = {
-  bucket: string
-  path: string
-  resource_type: string
-  resource_id: string
+  email: string
+  full_name?: string
 }
 
 function json(status: number, body: unknown) {
@@ -16,6 +14,10 @@ function json(status: number, body: unknown) {
       'access-control-allow-headers': 'authorization, x-client-info, apikey, content-type',
     },
   })
+}
+
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase()
 }
 
 Deno.serve(async (req) => {
@@ -38,30 +40,34 @@ Deno.serve(async (req) => {
   const userId = userData.user?.id
   if (!userId) return json(401, { error: 'Unauthorized' })
 
+  const { data: me, error: meError } = await userClient.from('profiles').select('org_id, app_role, active').eq('id', userId).single()
+  if (meError || !me?.org_id) return json(403, { error: 'Forbidden' })
+  if (!me.active || me.app_role !== 'admin') return json(403, { error: 'Forbidden' })
+
   const input = (await req.json()) as Input
-  if (!input?.bucket || !input?.path || !input?.resource_id) return json(400, { error: 'Invalid payload' })
-
-  const { data: fileRow, error: fileError } = await userClient
-    .from('ticket_files')
-    .select('id, org_id, filename, storage_bucket, storage_path, sha256')
-    .eq('id', input.resource_id)
-    .single()
-
-  if (fileError || !fileRow) return json(404, { error: 'Not found' })
-  if (fileRow.storage_bucket !== input.bucket || fileRow.storage_path !== input.path) return json(400, { error: 'Path mismatch' })
+  const email = normalizeEmail(input?.email ?? '')
+  if (!email || !email.includes('@')) return json(400, { error: 'Invalid email' })
 
   const serviceClient = createClient(supabaseUrl, serviceKey)
-  const { data: signed, error: signError } = await serviceClient.storage.from(input.bucket).createSignedUrl(input.path, 60)
-  if (signError || !signed?.signedUrl) return json(500, { error: 'Sign failed' })
 
-  await serviceClient.from('audit_log').insert({
-    org_id: fileRow.org_id,
-    actor_user_id: userId,
-    action: 'TICKET_FILE_DOWNLOAD',
-    resource_type: 'ticket_file',
-    resource_id: fileRow.id,
-    metadata: { filename: fileRow.filename, sha256: fileRow.sha256 },
+  const inviteRes = await serviceClient.auth.admin.inviteUserByEmail(email, {
+    data: {
+      org_id: me.org_id,
+      full_name: (input.full_name ?? '').trim() || null,
+      invited_by: userId,
+    },
   })
 
-  return json(200, { signed_url: signed.signedUrl, expires_in: 60 })
+  if (inviteRes.error) return json(500, { error: inviteRes.error.message })
+
+  await serviceClient.from('audit_log').insert({
+    org_id: me.org_id,
+    actor_user_id: userId,
+    action: 'USER_INVITE',
+    resource_type: 'auth_user',
+    resource_id: inviteRes.data.user?.id ?? null,
+    metadata: { email },
+  })
+
+  return json(200, { ok: true, user_id: inviteRes.data.user?.id ?? null })
 })

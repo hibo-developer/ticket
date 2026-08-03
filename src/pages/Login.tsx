@@ -3,6 +3,8 @@ import { useAuth } from '@/core/auth/AuthContext'
 import { useState } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 
+const PASSWORD_AUTH_DISABLED = ['disabled', 'not enabled', 'invalid_grant']
+
 export default function Login() {
   const { session } = useAuth()
   const location = useLocation()
@@ -13,21 +15,43 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
 
   if (session) return <Navigate to={from} replace />
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+    setSuccess(null)
     setLoading(true)
 
-    const run =
-      mode === 'login'
-        ? supabase.auth.signInWithPassword({ email, password })
-        : supabase.auth.signUp({ email, password })
+    if (mode === 'login') {
+      const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
 
-    const { error: authError } = await run
-    if (authError) setError(authError.message)
+      if (authError) {
+        const message = authError.message.toLowerCase()
+        const needsFallback = PASSWORD_AUTH_DISABLED.some((token) => message.includes(token))
+
+        if (needsFallback) {
+          const { error: otpError } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } })
+          if (otpError) {
+            setError('La autenticación por correo y contraseña no está habilitada en este proyecto de Supabase. Activa el flujo de auth en el panel o usa un método de acceso compatible y vuelve a intentarlo.')
+          } else {
+            setSuccess('Hemos enviado un enlace mágico a tu correo. Ábrelo para entrar y completa el acceso.')
+          }
+        } else {
+          setError(authError.message)
+        }
+      }
+    } else {
+      const { error: otpError } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } })
+      if (otpError) {
+        setError('No pudimos enviar el enlace mágico. Revisa la configuración de Auth en Supabase y vuelve a intentarlo.')
+      } else {
+        setSuccess('Hemos enviado un enlace mágico a tu correo para entrar. Completa el acceso desde el email.')
+      }
+    }
+
     setLoading(false)
   }
 
@@ -61,9 +85,11 @@ export default function Login() {
             </div>
 
             <form className="mt-6 space-y-4" onSubmit={onSubmit}>
-              <label className="block">
+              <label className="block" htmlFor="email">
                 <div className="text-xs text-zinc-300">Email</div>
                 <input
+                  id="email"
+                  aria-label="Email"
                   className="mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm outline-none ring-0 placeholder:text-zinc-600 focus:border-zinc-700"
                   type="email"
                   value={email}
@@ -71,9 +97,11 @@ export default function Login() {
                   required
                 />
               </label>
-              <label className="block">
+              <label className="block" htmlFor="password">
                 <div className="text-xs text-zinc-300">Contraseña</div>
                 <input
+                  id="password"
+                  aria-label="Contraseña"
                   className="mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm outline-none ring-0 placeholder:text-zinc-600 focus:border-zinc-700"
                   type="password"
                   value={password}
@@ -81,6 +109,9 @@ export default function Login() {
                   required
                   minLength={8}
                 />
+                <div className="mt-2 text-[11px] leading-5 text-zinc-500">
+                  Si la contraseña no funciona, el sistema puede enviarte un enlace mágico al email indicado para entrar directamente.
+                </div>
               </label>
 
               {error ? (
@@ -89,12 +120,18 @@ export default function Login() {
                 </div>
               ) : null}
 
+              {success ? (
+                <div className="rounded-lg border border-emerald-900/60 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-200">
+                  {success}
+                </div>
+              ) : null}
+
               <button
                 disabled={loading}
                 className="w-full rounded-lg bg-white px-3 py-2 text-sm font-medium text-zinc-950 hover:bg-zinc-200 disabled:opacity-60"
                 type="submit"
               >
-                {loading ? 'Procesando…' : mode === 'login' ? 'Entrar' : 'Crear cuenta'}
+                {loading ? 'Procesando…' : mode === 'login' ? 'Entrar con email' : 'Enviar enlace mágico'}
               </button>
             </form>
 
