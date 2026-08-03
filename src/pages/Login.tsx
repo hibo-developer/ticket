@@ -7,6 +7,9 @@ import { Navigate, useLocation } from 'react-router-dom'
 const PASSWORD_AUTH_FALLBACK = ['disabled', 'not enabled', 'invalid_grant', 'invalid_credentials', 'invalid login credentials']
 const OTP_RATE_LIMIT = ['429', 'too many requests', 'rate limit', 'ratelimit']
 const OTP_SEND_HELP = 'No pudimos enviar el enlace mágico. Revisa la configuración de Auth en Supabase: proveedor de correo, URLs de redirección y registro de usuarios.'
+const OTP_RATE_LIMIT_HELP =
+  'Hemos detectado demasiados intentos recientes. Revisa si ya recibiste un enlace en tu correo y, si no, espera un momento antes de intentarlo de nuevo.'
+const PASSWORD_AUTH_DISABLED = ['disabled', 'not enabled', 'invalid_grant']
 
 export default function Login() {
   const { session } = useAuth()
@@ -41,6 +44,26 @@ export default function Login() {
 
   if (session) return <Navigate to={from} replace />
 
+  const sendMagicLink = async (source: 'password_fallback' | 'direct') => {
+    const { error: otpError } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: authRedirectUrl },
+    })
+
+    if (otpError) {
+      const otpMessage = otpError.message?.toLowerCase() ?? ''
+      if (OTP_RATE_LIMIT.some((token) => otpMessage.includes(token))) {
+        setCooldownUntil(Date.now() + 30000)
+        setError(OTP_RATE_LIMIT_HELP)
+      } else {
+        setError(source === 'password_fallback' ? 'La autenticación por correo y contraseña no está habilitada en este proyecto de Supabase. Activa el flujo de auth en el panel o usa un método de acceso compatible y vuelve a intentarlo.' : OTP_SEND_HELP)
+      }
+      return
+    }
+
+    setSuccess('Hemos enviado un enlace mágico a tu correo. Ábrelo para entrar y completa el acceso.')
+  }
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (loading || Date.now() < cooldownUntil) return
@@ -59,28 +82,19 @@ export default function Login() {
 
           if (needsFallback) {
             try {
-              const { error: otpError } = await supabase.auth.signInWithOtp({
-                email,
-                options: { emailRedirectTo: authRedirectUrl },
-              })
-              if (otpError) {
-                const otpMessage = otpError.message?.toLowerCase() ?? ''
-                if (OTP_RATE_LIMIT.some((token) => otpMessage.includes(token))) {
-                  setCooldownUntil(Date.now() + 30000)
-                  setError('Hemos detectado demasiados intentos recientes. Espera un momento y vuelve a intentarlo más tarde.')
-                } else {
-                  setError('La autenticación por correo y contraseña no está habilitada en este proyecto de Supabase. Activa el flujo de auth en el panel o usa un método de acceso compatible y vuelve a intentarlo.')
-                }
-              } else {
-                setSuccess('Hemos enviado un enlace mágico a tu correo. Ábrelo para entrar y completa el acceso.')
-              }
+              await sendMagicLink('password_fallback')
             } catch (otpException: any) {
               const otpMessage = (otpException?.message ?? '').toLowerCase()
               if (OTP_RATE_LIMIT.some((token) => otpMessage.includes(token))) {
                 setCooldownUntil(Date.now() + 30000)
-                setError('Hemos detectado demasiados intentos recientes. Espera un momento y vuelve a intentarlo más tarde.')
+                setError(OTP_RATE_LIMIT_HELP)
               } else {
-                setError(OTP_SEND_HELP)
+                const passwordAuthDisabled = PASSWORD_AUTH_DISABLED.some((token) => message.includes(token))
+                setError(
+                  passwordAuthDisabled
+                    ? 'La autenticación por correo y contraseña no está habilitada en este proyecto de Supabase. Activa el flujo de auth en el panel o usa un método de acceso compatible y vuelve a intentarlo.'
+                    : OTP_SEND_HELP,
+                )
               }
             }
           } else {
@@ -247,6 +261,35 @@ export default function Login() {
               >
                 {loading ? 'Procesando…' : cooldownSeconds > 0 ? `Espera ${cooldownSeconds}s` : mode === 'login' ? 'Entrar con email' : 'Enviar enlace mágico'}
               </button>
+
+              {mode === 'login' ? (
+                <button
+                  type="button"
+                  disabled={loading || cooldownSeconds > 0 || !email.trim()}
+                  className="w-full rounded-lg border border-zinc-700 bg-transparent px-3 py-2 text-sm font-medium text-zinc-100 hover:bg-zinc-800 disabled:opacity-60"
+                  onClick={async () => {
+                    if (loading || Date.now() < cooldownUntil || !email.trim()) return
+                    setError(null)
+                    setSuccess(null)
+                    setLoading(true)
+                    try {
+                      await sendMagicLink('direct')
+                    } catch (otpException: any) {
+                      const otpMessage = (otpException?.message ?? '').toLowerCase()
+                      if (OTP_RATE_LIMIT.some((token) => otpMessage.includes(token))) {
+                        setCooldownUntil(Date.now() + 30000)
+                        setError(OTP_RATE_LIMIT_HELP)
+                      } else {
+                        setError(OTP_SEND_HELP)
+                      }
+                    } finally {
+                      setLoading(false)
+                    }
+                  }}
+                >
+                  {loading ? 'Procesando…' : cooldownSeconds > 0 ? `Espera ${cooldownSeconds}s` : 'Entrar con enlace mágico'}
+                </button>
+              ) : null}
             </form>
 
             <div className="mt-4 text-xs text-zinc-400">

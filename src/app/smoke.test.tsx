@@ -199,6 +199,25 @@ describe('smoke', () => {
     expect(await screen.findByText(/hemos enviado un enlace/i)).toBeInTheDocument()
   })
 
+  it('permite solicitar un enlace mágico directo desde login', async () => {
+    authStateRef.current = { ...authStateRef.current, session: null, profile: null }
+    supabaseMock.auth.signInWithOtp.mockReset()
+    supabaseMock.auth.signInWithOtp.mockResolvedValueOnce({ error: null })
+
+    render(
+      <MemoryRouter>
+        <Login />
+      </MemoryRouter>,
+    )
+
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'user@test.local' } })
+    fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Entrar con enlace mágico' }))
+
+    expect(await screen.findByText(/hemos enviado un enlace/i)).toBeInTheDocument()
+    expect(supabaseMock.auth.signInWithOtp).toHaveBeenCalledTimes(1)
+  })
+
   it('muestra un mensaje claro cuando Supabase devuelve rate limit en OTP', async () => {
     authStateRef.current = { ...authStateRef.current, session: null, profile: null }
     supabaseMock.auth.signInWithPassword.mockResolvedValueOnce({ error: { message: 'Auth is disabled' } })
@@ -235,8 +254,8 @@ describe('smoke', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Entrar con email' }))
 
     expect(await screen.findByText(/demasiados intentos/i)).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByRole('button', { name: /Espera 30s/i })).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: /Espera 30s/i }))
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Espera \d+s/i }).length).toBeGreaterThan(0))
+    fireEvent.click(screen.getAllByRole('button', { name: /Espera \d+s/i })[0])
 
     expect(supabaseMock.auth.signInWithOtp).toHaveBeenCalledTimes(1)
   })
