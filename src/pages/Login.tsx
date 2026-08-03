@@ -4,7 +4,7 @@ import { getAuthRedirectUrl } from '@/core/auth/redirect'
 import { useEffect, useState } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 
-const PASSWORD_AUTH_DISABLED = ['disabled', 'not enabled', 'invalid_grant']
+const PASSWORD_AUTH_FALLBACK = ['disabled', 'not enabled', 'invalid_grant', 'invalid_credentials', 'invalid login credentials']
 const OTP_RATE_LIMIT = ['429', 'too many requests', 'rate limit', 'ratelimit']
 const OTP_SEND_HELP = 'No pudimos enviar el enlace mágico. Revisa la configuración de Auth en Supabase: proveedor de correo, URLs de redirección y registro de usuarios.'
 
@@ -55,7 +55,7 @@ export default function Login() {
 
         if (authError) {
           const message = authError.message.toLowerCase()
-          const needsFallback = PASSWORD_AUTH_DISABLED.some((token) => message.includes(token))
+          const needsFallback = PASSWORD_AUTH_FALLBACK.some((token) => message.includes(token))
 
           if (needsFallback) {
             try {

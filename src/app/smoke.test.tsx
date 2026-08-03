@@ -181,6 +181,24 @@ describe('smoke', () => {
     expect(await screen.findByText(/hemos enviado un enlace/i)).toBeInTheDocument()
   })
 
+  it('envía un enlace mágico cuando Supabase rechaza la contraseña con invalid login credentials', async () => {
+    authStateRef.current = { ...authStateRef.current, session: null, profile: null }
+    supabaseMock.auth.signInWithPassword.mockResolvedValueOnce({ error: { message: 'Invalid login credentials' } })
+    supabaseMock.auth.signInWithOtp.mockResolvedValueOnce({ error: null })
+
+    render(
+      <MemoryRouter>
+        <Login />
+      </MemoryRouter>,
+    )
+
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'user@test.local' } })
+    fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Entrar con email' }))
+
+    expect(await screen.findByText(/hemos enviado un enlace/i)).toBeInTheDocument()
+  })
+
   it('muestra un mensaje claro cuando Supabase devuelve rate limit en OTP', async () => {
     authStateRef.current = { ...authStateRef.current, session: null, profile: null }
     supabaseMock.auth.signInWithPassword.mockResolvedValueOnce({ error: { message: 'Auth is disabled' } })
