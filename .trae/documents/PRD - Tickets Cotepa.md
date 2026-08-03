@@ -1,5 +1,5 @@
 ## 1. Visión del producto
-Tickets Cotepa es una plataforma empresarial modular (tipo suite) para gestionar tickets/recibos y gastos con adjuntos, control de acceso granular, personalización de vistas sin tocar código y un sistema integrado de informes. La aplicación debe ser completamente original e independiente: no reutiliza código, dependencias, marcas, recursos ni elementos derivados de Odoo ni de software asociado.
+Tickets Cotepa es una plataforma empresarial modular (tipo suite) para gestionar tickets/recibos y gastos con adjuntos, control de acceso granular, personalización de vistas sin tocar código y un sistema integrado de informes. La aplicación debe ser completamente original e independiente: no reutiliza código, dependencias, marcas o recursos de terceros no autorizados.
 
 - Usuarios objetivo: empleados (captura/consulta), responsables (aprobación), finanzas (control y reporting), administración TI (configuración, seguridad, auditoría).
 - Objetivo: centralizar evidencias (tiquetes/recibos) y gastos de forma segura, auditable y configurable, con módulos activables/desactivables.
