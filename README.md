@@ -16,8 +16,9 @@ PWA empresarial modular para gestionar tickets/recibos y gastos con adjuntos, pe
    - Ejecuta el SQL de [20260731_000001_init.sql](file:///c:/Oddo/supabase/migrations/20260731_000001_init.sql) en el SQL editor de Supabase.
 3. Crea el bucket y políticas:
    - Está incluido en la migración (bucket privado `tickets-cotepa` + políticas sobre `storage.objects`).
-4. Despliega la Edge Function:
-   - Carpeta: [storage-sign-download](file:///c:/Oddo/supabase/functions/storage-sign-download/index.ts)
+4. Despliega las Edge Functions:
+   - [storage-sign-download](file:///c:/Oddo/supabase/functions/storage-sign-download/index.ts)
+   - [auth-create-user](file:///c:/Oddo/supabase/functions/auth-create-user/index.ts)
    - Variables requeridas en Supabase Functions:
      - `SUPABASE_URL`
      - `SUPABASE_ANON_KEY`
@@ -30,11 +31,20 @@ npm run dev
 ```
 
 ## Primer uso (setup)
-1. Entra en `/login` y crea cuenta.
-2. Accede a `/setup` para crear la organización inicial y asignarte como admin.
-3. En `/admin`:
+1. Entra en `/login` y usa la opción “Crear cuenta”.
+2. Introduce un correo válido y una contraseña fuerte.
+3. Si Supabase Auth no puede enviar el enlace mágico, la app intentará crear el usuario automáticamente mediante la Edge Function `auth-create-user` y después entrar con la contraseña.
+4. Tras entrar, la app te redirige a `/setup` para crear la organización inicial y asignarte como administrador.
+5. En `/admin`:
    - Activa/desactiva módulos.
    - Crea roles y asigna permisos a cada rol.
+
+### Configuración necesaria en Supabase Auth
+Para que el primer usuario pueda registrarse correctamente, revisa estas opciones en el panel de Supabase:
+- Auth > Settings > Email auth: activa el flujo de email y confirma que el proveedor de correo esté configurado.
+- Auth > Settings > URL Configuration: define `http://localhost:5173` como redirect URL de desarrollo y añade también la URL real del despliegue si aplica.
+- Auth > Settings > User signups: asegúrate de que el registro de usuarios esté permitido.
+- Si ves errores 400/429 al enviar el enlace mágico, la app intentará usar la Edge Function `auth-create-user`; si esa ruta falla, revisa el panel y el log de la función.
 
 ## Tests
 ```bash

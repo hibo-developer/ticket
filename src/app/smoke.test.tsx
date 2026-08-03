@@ -10,7 +10,7 @@ import Reports from '@/modules/reports/pages/Reports'
 import TicketDetail from '@/modules/tickets/pages/TicketDetail'
 import TicketsList from '@/modules/tickets/pages/TicketsList'
 import { AllPermissions } from '@/core/rbac/permissions'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
@@ -179,6 +179,95 @@ describe('smoke', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Entrar con email' }))
 
     expect(await screen.findByText(/hemos enviado un enlace/i)).toBeInTheDocument()
+  })
+
+  it('muestra un mensaje claro cuando Supabase devuelve rate limit en OTP', async () => {
+    authStateRef.current = { ...authStateRef.current, session: null, profile: null }
+    supabaseMock.auth.signInWithPassword.mockResolvedValueOnce({ error: { message: 'Auth is disabled' } })
+    supabaseMock.auth.signInWithOtp.mockRejectedValueOnce({ message: 'Too many requests', status: 429 })
+
+    render(
+      <MemoryRouter>
+        <Login />
+      </MemoryRouter>,
+    )
+
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'user@test.local' } })
+    fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Entrar con email' }))
+
+    expect(await screen.findByText(/demasiados intentos/i)).toBeInTheDocument()
+  })
+
+  it('no reintenta el enlace mágico de forma inmediata tras un bloqueo por rate limit', async () => {
+    authStateRef.current = { ...authStateRef.current, session: null, profile: null }
+    supabaseMock.auth.signInWithPassword.mockClear()
+    supabaseMock.auth.signInWithOtp.mockClear()
+    supabaseMock.auth.signInWithPassword.mockResolvedValueOnce({ error: { message: 'Auth is disabled' } })
+    supabaseMock.auth.signInWithOtp.mockRejectedValueOnce({ message: 'Too many requests', status: 429 })
+
+    render(
+      <MemoryRouter>
+        <Login />
+      </MemoryRouter>,
+    )
+
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'user@test.local' } })
+    fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Entrar con email' }))
+
+    expect(await screen.findByText(/demasiados intentos/i)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: /Espera 30s/i })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Espera 30s/i }))
+
+    expect(supabaseMock.auth.signInWithOtp).toHaveBeenCalledTimes(1)
+  })
+
+  it('muestra ayuda específica cuando el enlace mágico no se puede enviar', async () => {
+    authStateRef.current = { ...authStateRef.current, session: null, profile: null }
+    supabaseMock.auth.signInWithPassword.mockReset()
+    supabaseMock.auth.signInWithOtp.mockReset()
+    supabaseMock.auth.signInWithPassword.mockResolvedValueOnce({ error: { message: 'Auth is disabled' } })
+    supabaseMock.auth.signInWithOtp.mockResolvedValueOnce({ error: { message: 'email provider not configured' } })
+    supabaseMock.functions.invoke.mockResolvedValueOnce({ error: { message: 'unable' } })
+
+    render(
+      <MemoryRouter>
+        <Login />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }))
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'user@test.local' } })
+    fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: /enviar enlace mágico/i }))
+
+    expect(await screen.findByText(/configuración de Auth/i)).toBeInTheDocument()
+  })
+
+  it('crea el usuario directamente con contraseña cuando el enlace mágico falla', async () => {
+    authStateRef.current = { ...authStateRef.current, session: null, profile: null }
+    supabaseMock.auth.signInWithPassword.mockReset()
+    supabaseMock.auth.signInWithOtp.mockReset()
+    supabaseMock.auth.signInWithPassword
+      .mockResolvedValueOnce({ error: { message: 'Auth is disabled' } })
+      .mockResolvedValueOnce({ data: { session: { user: { id: 'u2', email: 'user@test.local' } } }, error: null })
+    supabaseMock.auth.signInWithOtp.mockResolvedValueOnce({ error: { message: 'email provider not configured' } })
+    supabaseMock.functions.invoke.mockResolvedValueOnce({ data: { ok: true, user_id: 'u2' }, error: null })
+
+    render(
+      <MemoryRouter>
+        <Login />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }))
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'user@test.local' } })
+    fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: /enviar enlace mágico/i }))
+
+    expect(await screen.findByText(/cuenta creada/i)).toBeInTheDocument()
+    expect(supabaseMock.functions.invoke).toHaveBeenCalledWith('auth-create-user', expect.anything())
   })
 
   it('usa un enlace mágico para el acceso cuando se intenta crear cuenta', async () => {

@@ -1,9 +1,11 @@
 import { supabase } from '@/core/auth/supabaseClient'
 import { useAuth } from '@/core/auth/AuthContext'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 
 const PASSWORD_AUTH_DISABLED = ['disabled', 'not enabled', 'invalid_grant']
+const OTP_RATE_LIMIT = ['429', 'too many requests', 'rate limit', 'ratelimit']
+const OTP_SEND_HELP = 'No pudimos enviar el enlace mágico. Revisa la configuración de Auth en Supabase: proveedor de correo, URLs de redirección y registro de usuarios.'
 
 export default function Login() {
   const { session } = useAuth()
@@ -16,43 +18,147 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [cooldownUntil, setCooldownUntil] = useState(0)
+  const [cooldownSeconds, setCooldownSeconds] = useState(0)
+
+  useEffect(() => {
+    if (!cooldownUntil) return
+
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000))
+      setCooldownSeconds(remaining)
+      if (remaining === 0) {
+        setCooldownUntil(0)
+      }
+    }
+
+    tick()
+    const intervalId = window.setInterval(tick, 1000)
+    return () => window.clearInterval(intervalId)
+  }, [cooldownUntil])
 
   if (session) return <Navigate to={from} replace />
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (loading || Date.now() < cooldownUntil) return
+
     setError(null)
     setSuccess(null)
     setLoading(true)
 
-    if (mode === 'login') {
-      const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
+    try {
+      if (mode === 'login') {
+        const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
 
-      if (authError) {
-        const message = authError.message.toLowerCase()
-        const needsFallback = PASSWORD_AUTH_DISABLED.some((token) => message.includes(token))
+        if (authError) {
+          const message = authError.message.toLowerCase()
+          const needsFallback = PASSWORD_AUTH_DISABLED.some((token) => message.includes(token))
 
-        if (needsFallback) {
-          const { error: otpError } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } })
-          if (otpError) {
-            setError('La autenticación por correo y contraseña no está habilitada en este proyecto de Supabase. Activa el flujo de auth en el panel o usa un método de acceso compatible y vuelve a intentarlo.')
+          if (needsFallback) {
+            try {
+              const { error: otpError } = await supabase.auth.signInWithOtp({
+                email,
+                options: { emailRedirectTo: window.location.origin },
+              })
+              if (otpError) {
+                const otpMessage = otpError.message?.toLowerCase() ?? ''
+                if (OTP_RATE_LIMIT.some((token) => otpMessage.includes(token))) {
+                  setCooldownUntil(Date.now() + 30000)
+                  setError('Hemos detectado demasiados intentos recientes. Espera un momento y vuelve a intentarlo más tarde.')
+                } else {
+                  setError('La autenticación por correo y contraseña no está habilitada en este proyecto de Supabase. Activa el flujo de auth en el panel o usa un método de acceso compatible y vuelve a intentarlo.')
+                }
+              } else {
+                setSuccess('Hemos enviado un enlace mágico a tu correo. Ábrelo para entrar y completa el acceso.')
+              }
+            } catch (otpException: any) {
+              const otpMessage = (otpException?.message ?? '').toLowerCase()
+              if (OTP_RATE_LIMIT.some((token) => otpMessage.includes(token))) {
+                setCooldownUntil(Date.now() + 30000)
+                setError('Hemos detectado demasiados intentos recientes. Espera un momento y vuelve a intentarlo más tarde.')
+              } else {
+                setError(OTP_SEND_HELP)
+              }
+            }
           } else {
-            setSuccess('Hemos enviado un enlace mágico a tu correo. Ábrelo para entrar y completa el acceso.')
+            setError(authError.message)
           }
-        } else {
-          setError(authError.message)
+        }
+      } else {
+        try {
+          const { error: otpError } = await supabase.auth.signInWithOtp({
+            email,
+            options: { emailRedirectTo: window.location.origin },
+          })
+          if (otpError) {
+            const otpMessage = otpError.message?.toLowerCase() ?? ''
+            if (OTP_RATE_LIMIT.some((token) => otpMessage.includes(token))) {
+              setCooldownUntil(Date.now() + 30000)
+              setError('Hemos detectado demasiados intentos recientes. Espera un momento y vuelve a intentarlo más tarde.')
+            } else {
+              try {
+                const { error: directError } = await supabase.auth.signInWithPassword({ email, password })
+                if (!directError) {
+                  setSuccess('Cuenta creada y acceso listo.')
+                } else {
+                  const createUserResponse = await supabase.functions.invoke('auth-create-user', {
+                    body: { email, password },
+                  })
+
+                  if (createUserResponse.error) {
+                    setError(OTP_SEND_HELP)
+                  } else {
+                    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+                    if (signInError) {
+                      setError('La cuenta se creó, pero no pudimos entrar automáticamente. Intenta iniciar sesión con la contraseña.')
+                    } else {
+                      setSuccess('Cuenta creada y acceso listo.')
+                    }
+                  }
+                }
+              } catch (fallbackException: any) {
+                setError(OTP_SEND_HELP)
+              }
+            }
+          } else {
+            setSuccess('Hemos enviado un enlace mágico a tu correo para entrar. Completa el acceso desde el email.')
+          }
+        } catch (otpException: any) {
+          const otpMessage = (otpException?.message ?? '').toLowerCase()
+          if (OTP_RATE_LIMIT.some((token) => otpMessage.includes(token))) {
+            setCooldownUntil(Date.now() + 30000)
+            setError('Hemos detectado demasiados intentos recientes. Espera un momento y vuelve a intentarlo más tarde.')
+          } else {
+            try {
+              const { error: directError } = await supabase.auth.signInWithPassword({ email, password })
+              if (!directError) {
+                setSuccess('Cuenta creada y acceso listo.')
+              } else {
+                const createUserResponse = await supabase.functions.invoke('auth-create-user', {
+                  body: { email, password },
+                })
+
+                if (createUserResponse.error) {
+                  setError(OTP_SEND_HELP)
+                } else {
+                  const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+                  if (signInError) {
+                    setError('La cuenta se creó, pero no pudimos entrar automáticamente. Intenta iniciar sesión con la contraseña.')
+                  } else {
+                    setSuccess('Cuenta creada y acceso listo.')
+                  }
+                }
+              }
+            } catch (fallbackException: any) {
+              setError(OTP_SEND_HELP)
+            }
+          }
         }
       }
-    } else {
-      const { error: otpError } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } })
-      if (otpError) {
-        setError('No pudimos enviar el enlace mágico. Revisa la configuración de Auth en Supabase y vuelve a intentarlo.')
-      } else {
-        setSuccess('Hemos enviado un enlace mágico a tu correo para entrar. Completa el acceso desde el email.')
-      }
+    } finally {
+      setLoading(false)
     }
-
-    setLoading(false)
   }
 
   return (
@@ -126,12 +232,18 @@ export default function Login() {
                 </div>
               ) : null}
 
+              {cooldownSeconds > 0 ? (
+                <div className="rounded-lg border border-amber-900/60 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
+                  Espera {cooldownSeconds}s para intentar de nuevo.
+                </div>
+              ) : null}
+
               <button
-                disabled={loading}
+                disabled={loading || cooldownSeconds > 0}
                 className="w-full rounded-lg bg-white px-3 py-2 text-sm font-medium text-zinc-950 hover:bg-zinc-200 disabled:opacity-60"
                 type="submit"
               >
-                {loading ? 'Procesando…' : mode === 'login' ? 'Entrar con email' : 'Enviar enlace mágico'}
+                {loading ? 'Procesando…' : cooldownSeconds > 0 ? `Espera ${cooldownSeconds}s` : mode === 'login' ? 'Entrar con email' : 'Enviar enlace mágico'}
               </button>
             </form>
 
