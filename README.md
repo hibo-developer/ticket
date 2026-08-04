@@ -12,7 +12,7 @@ PWA empresarial modular para gestionar tickets/recibos y gastos con adjuntos, pe
    - Rellena:
      - `VITE_SUPABASE_URL`
      - `VITE_SUPABASE_ANON_KEY`
-     - `VITE_AUTH_REDIRECT_URL` (en producción: `https://ticket-cotepa.netlify.app`)
+     - `VITE_AUTH_REDIRECT_URL` (en local: `http://localhost:5173`; en producción: `https://ticket-cotepa.netlify.app`)
 2. Crea el esquema en Supabase:
    - Ejecuta el SQL de [20260731_000001_init.sql](file:///c:/Oddo/supabase/migrations/20260731_000001_init.sql) en el SQL editor de Supabase.
 3. Crea el bucket y políticas:
@@ -63,6 +63,11 @@ Para que el primer usuario pueda registrarse correctamente, revisa estas opcione
 - Auth > Settings > URL Configuration: añade `http://localhost:5173` para desarrollo y `https://ticket-cotepa.netlify.app` a la lista de `Redirect URLs`.
 - Auth > Settings > User signups: asegúrate de que el registro de usuarios esté permitido.
 - Si ves errores 400/429 al enviar el enlace mágico, revisa el proveedor de email de Supabase, URLs de redirección y rate limits. Para acceso por invitación, usa Admin → Usuarios.
+
+### Redirecciones por entorno
+- En desarrollo, la app usa `http://localhost:5173` para los enlaces mágicos y callbacks de auth.
+- En producción, Netlify fija `VITE_AUTH_REDIRECT_URL=https://ticket-cotepa.netlify.app` desde [netlify.toml](file:///c:/ticket-1/netlify.toml), evitando que un fallback local termine embebido en el build.
+- Si no existe variable configurada, el cliente usa `window.location.origin`; solo cae en `localhost` cuando el entorno es de desarrollo.
 
 ## Seguridad (imágenes y datos)
 - Storage: bucket privado `tickets-cotepa` con políticas por organización (prefijo `org_<org_id>`).
