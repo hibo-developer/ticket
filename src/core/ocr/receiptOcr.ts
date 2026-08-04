@@ -8,6 +8,9 @@ export type ReceiptOcrResult = ReceiptOcrFields & {
   text: string
 }
 
+const tesseractWorkerPath = '/tesseract/worker.min.js'
+const tesseractCorePath = '/tesseract'
+
 const VENDOR_BLACKLIST = [
   'ticket',
   'factura',
@@ -239,6 +242,8 @@ export async function runReceiptOcr(
   const preprocessed = await preprocessReceiptImage(image)
 
   const worker = await createWorker(lang, 1, {
+    workerPath: tesseractWorkerPath,
+    corePath: tesseractCorePath,
     logger: (m: any) => {
       if (m?.status === 'recognizing text' && typeof m?.progress === 'number') {
         input?.onProgress?.(m.progress)

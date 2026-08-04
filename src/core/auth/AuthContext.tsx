@@ -34,9 +34,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(false)
         return
       }
-      const { data } = await supabase.auth.getSession()
+      const { data, error } = await supabase.auth.getSession()
+      if (error) {
+        await supabase.auth.signOut({ scope: 'local' })
+      }
       if (cancelled) return
-      setSession(data.session ?? null)
+      setSession(error ? null : data.session ?? null)
       setLoading(false)
     }
 
