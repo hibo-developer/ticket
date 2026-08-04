@@ -21,6 +21,13 @@ const insertTicket = vi.fn(() => ({
     single: () => Promise.resolve({ data: { id: 't2' }, error: null }),
   }),
 }))
+const updateTicket: any = vi.fn()
+const updateTicketQuery: any = {
+  eq: () => updateTicketQuery,
+  then: (resolve: any, reject: any) => Promise.resolve({ error: null }).then(resolve, reject),
+}
+updateTicket.mockImplementation(() => updateTicketQuery)
+
 const insertTicketFile = vi.fn().mockResolvedValue({ error: null })
 const uploadObject = vi.fn().mockResolvedValue({ data: null, error: null })
 const listTicketsResult = { data: [], error: null }
@@ -28,6 +35,8 @@ const listTicketsResult = { data: [], error: null }
 const ticketsQuery: any = {
   select: () => ticketsQuery,
   eq: () => ticketsQuery,
+  is: () => ticketsQuery,
+  lt: () => ticketsQuery,
   order: () => ticketsQuery,
   limit: () => ticketsQuery,
   maybeSingle: () => Promise.resolve({ data: null, error: null }),
@@ -41,6 +50,7 @@ vi.mock('@/core/auth/supabaseClient', () => ({
         return {
           ...ticketsQuery,
           insert: insertTicket,
+          update: updateTicket,
         }
       }
 
@@ -75,8 +85,10 @@ vi.mock('@/core/audit/audit', () => ({
 describe('TicketsList', () => {
   beforeEach(() => {
     insertTicket.mockClear()
+    updateTicket.mockClear()
     insertTicketFile.mockClear()
     uploadObject.mockClear()
+    listTicketsResult.data = []
   })
 
   it('crea un ticket', async () => {
@@ -134,5 +146,38 @@ describe('TicketsList', () => {
     )
 
     expect(screen.getAllByRole('button', { name: 'Capturar ticket' }).length).toBeGreaterThan(0)
+  })
+
+  it('elimina un ticket desde la lista', async () => {
+    const user = userEvent.setup()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    listTicketsResult.data = [
+      {
+        id: 't1',
+        title: 'Ticket demo',
+        status: 'draft',
+        ticket_date: null,
+        amount: null,
+        currency: 'EUR',
+        vendor: null,
+        created_at: '2026-08-04T10:00:00.000Z',
+        deleted_at: null,
+      },
+    ]
+
+    render(
+      <MemoryRouter>
+        <TicketsList />
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('Ticket demo')
+    await user.click(screen.getByRole('button', { name: 'Eliminar' }))
+
+    await waitFor(() => expect(updateTicket).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByText('Ticket demo')).not.toBeInTheDocument())
+
+    confirmSpy.mockRestore()
   })
 })

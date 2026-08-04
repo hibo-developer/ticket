@@ -11,6 +11,7 @@ import { runReceiptOcr } from '@/core/ocr/receiptOcr'
 import { usePermissions } from '@/core/rbac/usePermissions'
 import { Permission } from '@/core/rbac/permissions'
 import { signDownloadUrl } from '@/core/storage/signedUrls'
+import { softDeleteTicket } from '@/core/tickets/ticketsCrud'
 import { useViewLayout } from '@/core/views/useViewLayout'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
@@ -23,6 +24,8 @@ type TicketRow = {
   amount: number | null
   currency: string | null
   vendor: string | null
+  created_at: string
+  deleted_at: string | null
 }
 
 type TicketFileRow = {
@@ -37,6 +40,7 @@ type TicketFileRow = {
 }
 
 const MAX_BYTES = 15 * 1024 * 1024
+const PAGE_SIZE = 50
 
 function isAllowedType(file: File) {
   if (file.type === 'application/pdf') return true
@@ -62,9 +66,14 @@ export default function TicketsList() {
   const [form, setForm] = useState({ title: '', vendor: '', amount: '' })
   const [rows, setRows] = useState<TicketRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(false)
   const [creating, setCreating] = useState(false)
   const [captureBusy, setCaptureBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [listError, setListError] = useState<string | null>(null)
+  const [flash, setFlash] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
@@ -73,31 +82,49 @@ export default function TicketsList() {
   const canDownload = permissions.has(Permission.TicketsDownload)
   const captureInputRef = useRef<HTMLInputElement>(null)
 
-  const load = async () => {
+  const load = async (opts?: { append?: boolean }) => {
     if (!profile?.org_id) {
       setRows([])
       setLoading(false)
+      setHasMore(false)
       return
     }
 
-    setLoading(true)
-    const { data, error } = await supabase
+    const append = Boolean(opts?.append)
+    const before = append ? rows[rows.length - 1]?.created_at : null
+
+    if (append) setLoadingMore(true)
+    else setLoading(true)
+
+    let q = supabase
       .from('tickets')
-      .select('id, title, status, ticket_date, amount, currency, vendor')
+      .select('id, title, status, ticket_date, amount, currency, vendor, created_at, deleted_at')
       .eq('org_id', profile.org_id)
+      .is('deleted_at', null)
       .order('created_at', { ascending: false })
-      .limit(50)
+      .limit(PAGE_SIZE + 1)
+
+    if (before) q = q.lt('created_at', before)
+
+    const { data, error } = await q
 
     if (error) {
-      setError(error.message)
-      setRows([])
+      setListError(error.message)
+      if (!append) setRows([])
       setLoading(false)
+      setLoadingMore(false)
       return
     }
 
-    setError(null)
-    setRows((data ?? []) as TicketRow[])
+    const page = (data ?? []) as TicketRow[]
+    const next = page.slice(0, PAGE_SIZE)
+
+    setListError(null)
+    setHasMore(page.length > PAGE_SIZE)
+    setRows((prev) => (append ? [...prev, ...next] : next))
+    if (!append) setSelected(() => new Set())
     setLoading(false)
+    setLoadingMore(false)
   }
 
   useEffect(() => {
@@ -109,7 +136,8 @@ export default function TicketsList() {
     if (!form.title.trim()) return
 
     setCreating(true)
-    setError(null)
+    setFormError(null)
+    setFlash(null)
 
     const parsedAmount = form.amount.trim() ? Number(form.amount) : null
     const res = await supabase
@@ -129,7 +157,7 @@ export default function TicketsList() {
     setCreating(false)
 
     if (res.error) {
-      setError(res.error.message)
+      setFormError(res.error.message)
       return
     }
 
@@ -150,17 +178,18 @@ export default function TicketsList() {
     if (!canWrite) return
 
     if (file.size > MAX_BYTES) {
-      setError(`El archivo supera el límite (${Math.round(MAX_BYTES / (1024 * 1024))}MB).`)
+      setFormError(`El archivo supera el límite (${Math.round(MAX_BYTES / (1024 * 1024))}MB).`)
       return
     }
 
     if (!isAllowedType(file)) {
-      setError('Formato no permitido. Admite PDF, imágenes y XML.')
+      setFormError('Formato no permitido. Admite PDF, imágenes y XML.')
       return
     }
 
     setCaptureBusy(true)
-    setError(null)
+    setFormError(null)
+    setFlash(null)
 
     try {
       let ocr: Awaited<ReturnType<typeof runReceiptOcr>> | null = null
@@ -240,14 +269,43 @@ export default function TicketsList() {
       await load()
       navigate(`/tickets/${ticketId}`)
     } catch (e: any) {
-      setError(e?.message ?? 'No se pudo capturar el ticket.')
+      setFormError(e?.message ?? 'No se pudo capturar el ticket.')
     } finally {
       setCaptureBusy(false)
     }
   }
 
+  const deleteRow = async (r: TicketRow) => {
+    if (!profile?.org_id) return
+    if (!canWrite) return
+    if (deletingId) return
+
+    const ok = window.confirm(`¿Eliminar el ticket "${r.title}"? Esta acción no se puede revertir.`)
+    if (!ok) return
+
+    setDeletingId(r.id)
+    setFlash(null)
+
+    try {
+      await softDeleteTicket({ org_id: profile.org_id, ticket_id: r.id, reason: 'deleted_from_tickets_list' })
+
+      setRows((prev) => prev.filter((x) => x.id !== r.id))
+      setSelected((prev) => {
+        const next = new Set(prev)
+        next.delete(r.id)
+        return next
+      })
+      setFlash({ type: 'success', text: 'Ticket eliminado.' })
+    } catch (e: any) {
+      setFlash({ type: 'error', text: e?.message ?? 'No se pudo eliminar el ticket.' })
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   const visibleColumns = listLayout.fields.filter((f) => f.visible !== false)
   const canShare = typeof navigator !== 'undefined' && 'share' in navigator
+  const allSelected = rows.length > 0 && rows.every((r) => selected.has(r.id))
 
   return (
     <div className="space-y-6">
@@ -341,7 +399,7 @@ export default function TicketsList() {
             {creating ? 'Creando…' : 'Crear'}
           </Button>
         </div>
-        {error ? <div className="mt-3 text-sm text-rose-600">{error}</div> : null}
+        {formError ? <div className="mt-3 text-sm text-rose-600">{formError}</div> : null}
       </div>
 
       <div className="rounded-2xl border border-zinc-200 bg-white shadow-sm">
@@ -491,6 +549,12 @@ export default function TicketsList() {
         </div>
 
         {exportError ? <div className="px-5 pb-4 text-sm text-rose-600">{exportError}</div> : null}
+        {listError ? <div className="px-5 pb-4 text-sm text-rose-600">{listError}</div> : null}
+        {flash ? (
+          <div className="px-5 pb-4 text-sm" aria-live="polite">
+            <span className={flash.type === 'success' ? 'text-emerald-700' : 'text-rose-600'}>{flash.text}</span>
+          </div>
+        ) : null}
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
@@ -500,7 +564,7 @@ export default function TicketsList() {
                   <input
                     type="checkbox"
                     aria-label="Seleccionar todos"
-                    checked={rows.length > 0 && selected.size === rows.length}
+                    checked={allSelected}
                     onChange={(e) => {
                       const checked = e.target.checked
                       setSelected(() => {
@@ -514,18 +578,19 @@ export default function TicketsList() {
                 {visibleColumns.map((c) => (
                   <th key={c.key}>{c.label}</th>
                 ))}
+                <th className="w-44">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
               {loading ? (
                 <tr>
-                  <td className="px-5 py-4 text-zinc-500" colSpan={visibleColumns.length}>
+                  <td className="px-5 py-4 text-zinc-500" colSpan={visibleColumns.length + 2}>
                     Cargando…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td className="px-5 py-4 text-zinc-500" colSpan={visibleColumns.length}>
+                  <td className="px-5 py-4 text-zinc-500" colSpan={visibleColumns.length + 2}>
                     Sin tickets todavía.
                   </td>
                 </tr>
@@ -588,12 +653,49 @@ export default function TicketsList() {
                         </td>
                       )
                     })}
+                    <td className="px-5 py-4">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="w-full whitespace-nowrap sm:w-auto"
+                          onClick={() => navigate(`/tickets/${r.id}`)}
+                        >
+                          Abrir
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="danger"
+                          className="w-full whitespace-nowrap sm:w-auto"
+                          disabled={!canWrite || exporting || deletingId === r.id}
+                          onClick={() => void deleteRow(r)}
+                        >
+                          {deletingId === r.id ? 'Eliminando…' : 'Eliminar'}
+                        </Button>
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
         </div>
+
+        {hasMore ? (
+          <div className="border-t border-zinc-200 px-5 py-4">
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full"
+              disabled={loadingMore || loading || exporting}
+              onClick={() => void load({ append: true })}
+            >
+              {loadingMore ? 'Cargando…' : 'Cargar más'}
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   )
