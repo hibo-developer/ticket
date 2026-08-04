@@ -31,6 +31,14 @@ function safeRandomId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+function isPlaceholderTitle(value: string | null | undefined) {
+  const title = value?.trim() ?? ''
+  if (!title) return true
+  if (/^\d{10,}$/.test(title)) return true
+  if (/^ticket(?:\s+\d{4}-\d{2}-\d{2})?$/i.test(title)) return true
+  return false
+}
+
 export default function TicketDetail() {
   const { id } = useParams()
   const { profile } = useAuth()
@@ -145,13 +153,14 @@ export default function TicketDetail() {
             vendor: prev.vendor.trim() ? prev.vendor : ocr.vendor ?? prev.vendor,
             ticket_date: prev.ticket_date ? prev.ticket_date : ocr.date ?? prev.ticket_date,
             amount: prev.amount.trim() ? prev.amount : ocr.total != null ? ocr.total.toFixed(2) : prev.amount,
-            title: prev.title.trim()
-              ? prev.title
-              : ocr.vendor
-                ? ocr.vendor
-                : ocr.date
-                  ? `Ticket ${ocr.date}`
-                  : prev.title,
+            title:
+              !isPlaceholderTitle(prev.title)
+                ? prev.title
+                : ocr.vendor
+                  ? ocr.vendor
+                  : ocr.date
+                    ? `Ticket ${ocr.date}`
+                    : prev.title,
           }))
 
           setOcrInfo('Datos extraídos del ticket. Revisa y guarda si hace falta.')

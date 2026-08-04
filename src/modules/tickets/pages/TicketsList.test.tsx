@@ -180,4 +180,29 @@ describe('TicketsList', () => {
 
     confirmSpy.mockRestore()
   })
+
+  it('muestra el estado en español', async () => {
+    listTicketsResult.data = [
+      {
+        id: 't1',
+        title: 'Ticket demo',
+        status: 'draft',
+        ticket_date: null,
+        amount: null,
+        currency: 'EUR',
+        vendor: null,
+        created_at: '2026-08-04T10:00:00.000Z',
+        deleted_at: null,
+      },
+    ]
+
+    render(
+      <MemoryRouter>
+        <TicketsList />
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('Ticket demo')
+    expect(screen.getByText('Borrador')).toBeInTheDocument()
+  })
 })

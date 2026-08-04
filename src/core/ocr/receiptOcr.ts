@@ -8,12 +8,55 @@ export type ReceiptOcrResult = ReceiptOcrFields & {
   text: string
 }
 
+const VENDOR_BLACKLIST = [
+  'ticket',
+  'factura',
+  'nif',
+  'cif',
+  'iva',
+  'total',
+  'importe',
+  'gracias',
+  'fecha',
+  'serie',
+  'tarjeta',
+  'base',
+  'cuota',
+  'servicios',
+  'atendido',
+  'canje',
+]
+
+const BUSINESS_HINTS = [
+  'restaurante',
+  'restaurant',
+  'bar',
+  'cafe',
+  'cafeteria',
+  'hotel',
+  'hostal',
+  'supermercado',
+  'mercado',
+  'tienda',
+  'farmacia',
+  'bakery',
+  'panaderia',
+  'pizzeria',
+]
+
 function normalizeLines(text: string) {
   return text
     .replace(/\r/g, '\n')
     .split('\n')
     .map((l) => l.replace(/\s+/g, ' ').trim())
     .filter(Boolean)
+}
+
+function normalizeForSearch(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/0/g, 'o')
+    .replace(/[|!]/g, 'i')
 }
 
 function pad2(n: number) {
@@ -46,14 +89,13 @@ function parseDateToIso(input: string) {
 }
 
 function pickVendor(lines: string[]) {
-  const blacklist = ['ticket', 'factura', 'nif', 'cif', 'iva', 'total', 'importe', 'gracias']
   const looksLikeNoise = (line: string) => {
     const compact = line.replace(/\s/g, '')
     if (!compact) return true
     const letters = compact.match(/[a-záéíóúüñ]/gi)?.length ?? 0
     const digits = compact.match(/\d/g)?.length ?? 0
     if (letters < 3) return true
-    if (digits > 0) return true
+    if (digits > 2) return true
     const alphaRatio = letters / compact.length
     if (alphaRatio < 0.6) return true
     const uniq = new Set(compact.toLowerCase().split(''))
@@ -62,16 +104,30 @@ function pickVendor(lines: string[]) {
   }
 
   const candidates = lines
-    .slice(0, 12)
+    .slice(0, 10)
     .filter((l) => /[a-záéíóúüñ]/i.test(l))
-    .filter((l) => !/\d{4,}/.test(l))
+    .filter((l) => !/\d{5,}/.test(l))
     .filter((l) => !looksLikeNoise(l))
 
   const scored = candidates
-    .map((l) => {
-      const upperRatio = (l.replace(/[^A-ZÁÉÍÓÚÜÑ]/g, '').length || 0) / (l.replace(/[^A-Za-zÁÉÍÓÚÜÑ]/g, '').length || 1)
-      const penalty = blacklist.some((b) => l.toLowerCase().includes(b)) ? 1 : 0
-      return { line: l, score: upperRatio - penalty }
+    .map((l, index) => {
+      const normalized = normalizeForSearch(l)
+      const lettersOnly = l.replace(/[^A-Za-zÁÉÍÓÚÜÑ]/g, '')
+      const upperRatio = (l.replace(/[^A-ZÁÉÍÓÚÜÑ]/g, '').length || 0) / (lettersOnly.length || 1)
+      const hasBusinessHint = BUSINESS_HINTS.some((hint) => normalized.includes(hint))
+      const hasLegalSuffix = /\b(s\.?l\.?|s\.?a\.?|coop\.?)\b/i.test(l)
+      const looksLikeAddress = /\b(c\/|calle|avenida|avda|plaza|pol\.|ind\.|n[ºo])/i.test(l)
+      const blacklistHits = VENDOR_BLACKLIST.filter((token) => normalized.includes(token)).length
+
+      let score = upperRatio
+      score += hasBusinessHint ? 2 : 0
+      score += hasLegalSuffix ? 0.4 : 0
+      score += lettersOnly.length >= 10 ? 0.3 : 0
+      score += Math.max(0, 0.4 - index * 0.05)
+      score -= blacklistHits * 1.2
+      score -= looksLikeAddress ? 1.5 : 0
+
+      return { line: l, score }
     })
     .sort((a, b) => b.score - a.score)
 
@@ -104,7 +160,10 @@ function extractAmounts(line: string) {
 
 function pickTotal(lines: string[]) {
   const totalTokens = ['total', 'importe', 'a pagar', 'pagar', 'sum', 'importe total', 'total eur', 'total en eur', 'tef total', 'card', 'mastercard', 'visa']
-  const totalLines = lines.filter((l) => totalTokens.some((t) => l.toLowerCase().includes(t)))
+  const totalLines = lines.filter((l) => {
+    const normalized = normalizeForSearch(l)
+    return totalTokens.some((t) => normalized.includes(t))
+  })
   const prioritized = totalLines.length ? totalLines : lines
 
   let best: number | null = null
@@ -120,6 +179,16 @@ function pickTotal(lines: string[]) {
 }
 
 function pickDate(lines: string[]) {
+  const preferred = lines.filter((line) => {
+    const normalized = normalizeForSearch(line)
+    return normalized.includes('fecha') || normalized.includes('date')
+  })
+
+  for (const line of preferred) {
+    const d = parseDateToIso(line)
+    if (d) return d
+  }
+
   for (const line of lines) {
     const d = parseDateToIso(line)
     if (d) return d
@@ -134,6 +203,30 @@ export function extractReceiptFields(text: string): ReceiptOcrFields {
     date: pickDate(lines),
     total: pickTotal(lines),
   }
+}
+
+function scoreReceiptResult(result: ReceiptOcrResult) {
+  let score = 0
+  if (result.vendor) score += 2
+  if (result.date) score += 2
+  if (result.total != null) score += 3
+  score += Math.min(2, Math.floor(result.text.length / 80))
+  return score
+}
+
+function shouldRetryWithOriginal(result: ReceiptOcrResult) {
+  if (!result.text || result.text.length < 40) return true
+  if (!result.vendor || !result.date || result.total == null) return true
+  return false
+}
+
+async function recognizeReceipt(
+  worker: Awaited<ReturnType<typeof import('tesseract.js')['createWorker']>>,
+  source: Blob,
+): Promise<ReceiptOcrResult> {
+  const res = await worker.recognize(source)
+  const text = (res?.data?.text ?? '').trim()
+  return { text, ...extractReceiptFields(text) }
 }
 
 export async function runReceiptOcr(
@@ -158,11 +251,22 @@ export async function runReceiptOcr(
     preserve_interword_spaces: '1' as any,
   })
 
-  const res = await worker.recognize(preprocessed)
-  await worker.terminate()
+  try {
+    const primary = await recognizeReceipt(worker, preprocessed)
 
-  const text = (res?.data?.text ?? '').trim()
-  return { text, ...extractReceiptFields(text) }
+    if (preprocessed !== image && shouldRetryWithOriginal(primary)) {
+      try {
+        const fallback = await recognizeReceipt(worker, image)
+        return scoreReceiptResult(fallback) > scoreReceiptResult(primary) ? fallback : primary
+      } catch {
+        return primary
+      }
+    }
+
+    return primary
+  } finally {
+    await worker.terminate()
+  }
 }
 
 async function preprocessReceiptImage(image: Blob): Promise<Blob> {

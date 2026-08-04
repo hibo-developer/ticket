@@ -37,4 +37,28 @@ Total EUR: 33 96
     const fields = extractReceiptFields(text)
     expect(fields.total).toBeCloseTo(33.96, 2)
   })
+
+  it('prioriza el comercio, la fecha y el total en tickets de restaurante', () => {
+    const text = `
+RESTAURANTE RICHI
+FERNANDO ROBLES SL
+B96453667
+C/ TORRENTE, 2
+PAIPORTA 46200
+FACTURA SUSTITUTIVA
+cotepa s.l
+b46220042
+calle acequia rascanya 7 pol. ind. la pasc
+FECHA: 03/08/2026 10:03:07
+Factura Sustitutiva CENTRAL
+Serie/Nº: J101_1/665
+10% 35,45 3,55 39,00
+Tarjeta 39,00
+TOTAL 39,00
+`
+    const fields = extractReceiptFields(text)
+    expect(fields.vendor).toBe('RESTAURANTE RICHI')
+    expect(fields.date).toBe('2026-08-03')
+    expect(fields.total).toBeCloseTo(39, 2)
+  })
 })

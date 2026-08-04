@@ -4,6 +4,7 @@ import { useAuth } from '@/core/auth/AuthContext'
 import { Permission } from '@/core/rbac/permissions'
 import { usePermissions } from '@/core/rbac/usePermissions'
 import { listTickets, recreateFailedTicket, softDeleteTicket, updateTicket } from '@/core/tickets/ticketsCrud'
+import { getTicketStatusLabel } from '@/core/tickets/statusLabel'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -140,7 +141,7 @@ export default function AdminTicketRecovery() {
       <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
           <Input placeholder="Ticket ID" value={filters.ticket_id} onChange={(e) => setFilters((p) => ({ ...p, ticket_id: e.target.value }))} />
-          <Input placeholder="Status" value={filters.status} onChange={(e) => setFilters((p) => ({ ...p, status: e.target.value }))} />
+          <Input placeholder="Estado" value={filters.status} onChange={(e) => setFilters((p) => ({ ...p, status: e.target.value }))} />
           <Input placeholder="Error code" value={filters.error_code} onChange={(e) => setFilters((p) => ({ ...p, error_code: e.target.value }))} />
           <Input type="date" value={filters.created_from} onChange={(e) => setFilters((p) => ({ ...p, created_from: e.target.value }))} />
           <Input type="date" value={filters.created_to} onChange={(e) => setFilters((p) => ({ ...p, created_to: e.target.value }))} />
@@ -166,7 +167,7 @@ export default function AdminTicketRecovery() {
             <tr className="[&>th]:px-5 [&>th]:py-3">
               <th>ID</th>
               <th>Título</th>
-              <th>Status</th>
+              <th>Estado</th>
               <th>Error</th>
               <th>Recreado desde</th>
               <th>Creado</th>
@@ -198,7 +199,7 @@ export default function AdminTicketRecovery() {
                       <div className="font-medium text-zinc-900">{r.title}</div>
                       <div className="text-xs text-zinc-500">{r.vendor ?? '—'}</div>
                     </td>
-                    <td className="px-5 py-4 text-zinc-700">{r.status}</td>
+                    <td className="px-5 py-4 text-zinc-700">{getTicketStatusLabel(r.status)}</td>
                     <td className="px-5 py-4">
                       <div className="text-zinc-700">{r.error_code ?? '—'}</div>
                       <div className="text-xs text-zinc-500">{r.error_message ?? ''}</div>

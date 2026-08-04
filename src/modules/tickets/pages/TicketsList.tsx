@@ -12,6 +12,7 @@ import { usePermissions } from '@/core/rbac/usePermissions'
 import { Permission } from '@/core/rbac/permissions'
 import { signDownloadUrl } from '@/core/storage/signedUrls'
 import { softDeleteTicket } from '@/core/tickets/ticketsCrud'
+import { getTicketStatusLabel } from '@/core/tickets/statusLabel'
 import { useViewLayout } from '@/core/views/useViewLayout'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
@@ -642,7 +643,7 @@ export default function TicketsList() {
                         return (
                           <td key={c.key} className="px-5 py-4">
                             <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-700">
-                              {r.status}
+                              {getTicketStatusLabel(r.status)}
                             </span>
                           </td>
                         )
