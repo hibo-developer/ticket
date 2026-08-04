@@ -12,6 +12,7 @@ vi.mock('@/core/auth/supabaseClient', () => {
     let draft = false
     const q: any = {
       select: () => q,
+      is: () => q,
       eq: (k: string, v: any) => {
         if (k === 'status' && v === 'draft') draft = true
         return q

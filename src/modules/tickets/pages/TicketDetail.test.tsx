@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   audit: vi.fn().mockResolvedValue(undefined),
   upload: vi.fn().mockResolvedValue({ data: null, error: null }),
   insertTicketFiles: vi.fn().mockResolvedValue({ error: null }),
+  updateTicket: vi.fn().mockResolvedValue({ error: null }),
   runReceiptOcr: vi.fn().mockResolvedValue({ vendor: 'RESTAURANTE RICHI', date: '2026-08-03', total: 39, text: 'mock' }),
   ticketRecord: {
     id: 't1',
@@ -75,6 +76,14 @@ vi.mock('@/core/auth/supabaseClient', () => ({
               }),
             }),
           }),
+          update: (payload: any) => {
+            mocks.updateTicket(payload)
+            return {
+              eq: () => ({
+                eq: () => Promise.resolve({ error: null }),
+              }),
+            }
+          },
         }
       }
       if (table === 'ticket_files') {
@@ -110,6 +119,7 @@ describe('TicketDetail', () => {
     mocks.ticketRecord.currency = 'EUR'
     mocks.ticketRecord.vendor = 'Proveedor'
     mocks.runReceiptOcr.mockClear()
+    mocks.updateTicket.mockClear()
   })
 
   it('sube un adjunto', async () => {
@@ -168,5 +178,37 @@ describe('TicketDetail', () => {
 
     const dateInput = container.querySelector('input[type="date"]') as HTMLInputElement
     await waitFor(() => expect(dateInput.value).toBe('2026-08-03'))
+  })
+
+  it('marca el ticket como valido al guardar cuando tiene datos completos', async () => {
+    mocks.ticketRecord.title = 'Ticket demo'
+    mocks.ticketRecord.vendor = 'Proveedor'
+    mocks.ticketRecord.ticket_date = '2026-08-03'
+    mocks.ticketRecord.amount = 39
+
+    const user = userEvent.setup()
+
+    render(
+      <MemoryRouter initialEntries={['/tickets/t1']}>
+        <Routes>
+          <Route path="/tickets/:id" element={<TicketDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByDisplayValue('Ticket demo')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    await waitFor(() =>
+      expect(mocks.updateTicket).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Ticket demo',
+          vendor: 'Proveedor',
+          ticket_date: '2026-08-03',
+          amount: 39,
+          status: 'processed',
+        }),
+      ),
+    )
   })
 })

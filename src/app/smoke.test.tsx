@@ -63,6 +63,8 @@ const supabaseMock = vi.hoisted(() => {
     const q: any = {
       select: () => q,
       eq: () => q,
+      is: () => q,
+      neq: () => q,
       in: () => q,
       order: () => q,
       limit: () => q,

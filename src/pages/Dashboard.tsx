@@ -22,14 +22,14 @@ export default function Dashboard() {
       setLoading(true)
 
       const [ticketsCount, expensesCount] = await Promise.all([
-        supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id),
+        supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id).is('deleted_at', null).neq('status', 'draft'),
         supabase.from('expenses').select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id),
       ])
 
       if (cancelled) return
 
       setMetrics([
-        { label: 'Tickets', value: String(ticketsCount.count ?? 0) },
+        { label: 'Tickets válidos', value: String(ticketsCount.count ?? 0) },
         { label: 'Gastos', value: String(expensesCount.count ?? 0) },
       ])
       setLoading(false)

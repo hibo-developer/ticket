@@ -10,7 +10,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 type ToggleRow = { module_id: string; enabled: boolean }
-type AuditRow = { id: string; action: string; resource_type: string; created_at: string }
 type RoleRow = { id: string; name: string; description: string | null }
 
 export default function Admin() {
@@ -18,7 +17,6 @@ export default function Admin() {
   const { permissions } = usePermissions()
 
   const [toggles, setToggles] = useState<Record<string, boolean>>({})
-  const [audit, setAudit] = useState<AuditRow[]>([])
   const [roles, setRoles] = useState<RoleRow[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -31,19 +29,13 @@ export default function Admin() {
     setLoading(true)
     setError(null)
 
-    const [tRes, aRes, rRes] = await Promise.all([
+    const [tRes, rRes] = await Promise.all([
       supabase.from('module_toggles').select('module_id, enabled').eq('org_id', profile.org_id),
-      supabase
-        .from('audit_log')
-        .select('id, action, resource_type, created_at')
-        .eq('org_id', profile.org_id)
-        .order('created_at', { ascending: false })
-        .limit(50),
       supabase.from('roles').select('id, name, description').eq('org_id', profile.org_id).order('name', { ascending: true }),
     ])
 
-    if (tRes.error || aRes.error || rRes.error) {
-      setError((tRes.error ?? aRes.error ?? rRes.error)?.message ?? 'Error al cargar Admin.')
+    if (tRes.error || rRes.error) {
+      setError((tRes.error ?? rRes.error)?.message ?? 'Error al cargar Admin.')
       setLoading(false)
       return
     }
@@ -53,7 +45,6 @@ export default function Admin() {
     for (const row of (tRes.data ?? []) as ToggleRow[]) next[row.module_id] = row.enabled
 
     setToggles(next)
-    setAudit((aRes.data ?? []) as AuditRow[])
     setRoles((rRes.data ?? []) as RoleRow[])
     setLoading(false)
   }
@@ -279,38 +270,6 @@ export default function Admin() {
               ))}
             </div>
           ) : null}
-        </div>
-      </div>
-
-      <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-        <div className="text-sm font-medium text-zinc-900">Auditoría reciente</div>
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="text-xs uppercase tracking-wide text-zinc-500">
-              <tr className="[&>th]:px-3 [&>th]:py-2">
-                <th>Fecha</th>
-                <th>Acción</th>
-                <th>Recurso</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100">
-              {audit.length === 0 ? (
-                <tr>
-                  <td className="px-3 py-3 text-zinc-500" colSpan={3}>
-                    Sin eventos.
-                  </td>
-                </tr>
-              ) : (
-                audit.map((a) => (
-                  <tr key={a.id} className="hover:bg-zinc-50">
-                    <td className="px-3 py-3 text-zinc-600">{new Date(a.created_at).toLocaleString()}</td>
-                    <td className="px-3 py-3 font-medium text-zinc-900">{a.action}</td>
-                    <td className="px-3 py-3 text-zinc-600">{a.resource_type}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
         </div>
       </div>
     </div>

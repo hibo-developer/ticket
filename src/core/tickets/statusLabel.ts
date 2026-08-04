@@ -7,7 +7,7 @@ export function getTicketStatusLabel(status: string | null | undefined) {
     case 'error':
       return 'Error'
     case 'processed':
-      return 'Procesado'
+      return 'Válido'
     case 'approved':
       return 'Aprobado'
     case 'rejected':

@@ -24,8 +24,8 @@ export default function Reports() {
       setError(null)
 
       const [ticketsCount, draftTickets, expensesSum] = await Promise.all([
-        supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id),
-        supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id).eq('status', 'draft'),
+        supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id).is('deleted_at', null),
+        supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id).is('deleted_at', null).eq('status', 'draft'),
         supabase.from('expenses').select('total_amount').eq('org_id', profile.org_id),
       ])
 

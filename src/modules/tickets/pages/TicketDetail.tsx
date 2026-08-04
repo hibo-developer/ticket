@@ -234,14 +234,18 @@ export default function TicketDetail() {
 
     const parsedAmount = form.amount.trim() ? Number(form.amount) : null
     const amount = parsedAmount !== null && Number.isFinite(parsedAmount) ? parsedAmount : null
+    const vendor = form.vendor.trim() ? form.vendor.trim() : null
+    const ticketDate = form.ticket_date ? form.ticket_date : null
+    const status = vendor && ticketDate && amount != null ? 'processed' : 'draft'
 
     const res = await supabase
       .from('tickets')
       .update({
         title,
-        vendor: form.vendor.trim() ? form.vendor.trim() : null,
-        ticket_date: form.ticket_date ? form.ticket_date : null,
+        vendor,
+        ticket_date: ticketDate,
         amount,
+        status,
       })
       .eq('id', id)
       .eq('org_id', profile.org_id)
@@ -258,7 +262,7 @@ export default function TicketDetail() {
       action: 'TICKET_UPDATE',
       resource_type: 'ticket',
       resource_id: id,
-      metadata: { title, vendor: form.vendor.trim() || null, ticket_date: form.ticket_date || null, amount },
+      metadata: { title, vendor, ticket_date: ticketDate, amount, status },
     })
 
     await load()
