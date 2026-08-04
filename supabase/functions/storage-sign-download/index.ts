@@ -34,7 +34,7 @@ Deno.serve(async (req) => {
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
-    const serviceKey = Deno.env.get('SERVICE_ROLE_KEY')
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
     if (!supabaseUrl || !anonKey || !serviceKey) return json(corsOrigin, 500, { error: 'Falta configuración de Supabase.' })
 
