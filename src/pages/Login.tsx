@@ -114,24 +114,18 @@ export default function Login() {
               setError('Hemos detectado demasiados intentos recientes. Espera un momento y vuelve a intentarlo más tarde.')
             } else {
               try {
-                const { error: directError } = await supabase.auth.signInWithPassword({ email, password })
-                if (!directError) {
-                  setSuccess('Cuenta creada y acceso listo.')
-                } else {
-                  const createUserResponse = await supabase.functions.invoke('auth-create-user', {
-                    body: { email, password },
-                  })
+                const { error: directError } = await supabase.auth.signUp({
+                  email,
+                  password,
+                  options: { emailRedirectTo: authRedirectUrl },
+                })
 
-                  if (createUserResponse.error) {
-                    setError(OTP_SEND_HELP)
-                  } else {
-                    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
-                    if (signInError) {
-                      setError('La cuenta se creó, pero no pudimos entrar automáticamente. Intenta iniciar sesión con la contraseña.')
-                    } else {
-                      setSuccess('Cuenta creada y acceso listo.')
-                    }
-                  }
+                if (directError) {
+                  setError(
+                    'No se pudo crear la cuenta. Si el acceso es por invitación, pide al administrador que te cree el usuario desde Administración → Usuarios.',
+                  )
+                } else {
+                  setSuccess('Cuenta creada. Revisa tu correo para completar el acceso si se requiere confirmación.')
                 }
               } catch (fallbackException: any) {
                 setError(OTP_SEND_HELP)
@@ -147,24 +141,18 @@ export default function Login() {
             setError('Hemos detectado demasiados intentos recientes. Espera un momento y vuelve a intentarlo más tarde.')
           } else {
             try {
-              const { error: directError } = await supabase.auth.signInWithPassword({ email, password })
-              if (!directError) {
-                setSuccess('Cuenta creada y acceso listo.')
-              } else {
-                const createUserResponse = await supabase.functions.invoke('auth-create-user', {
-                  body: { email, password },
-                })
+              const { error: directError } = await supabase.auth.signUp({
+                email,
+                password,
+                options: { emailRedirectTo: authRedirectUrl },
+              })
 
-                if (createUserResponse.error) {
-                  setError(OTP_SEND_HELP)
-                } else {
-                  const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
-                  if (signInError) {
-                    setError('La cuenta se creó, pero no pudimos entrar automáticamente. Intenta iniciar sesión con la contraseña.')
-                  } else {
-                    setSuccess('Cuenta creada y acceso listo.')
-                  }
-                }
+              if (directError) {
+                setError(
+                  'No se pudo crear la cuenta. Si el acceso es por invitación, pide al administrador que te cree el usuario desde Administración → Usuarios.',
+                )
+              } else {
+                setSuccess('Cuenta creada. Revisa tu correo para completar el acceso si se requiere confirmación.')
               }
             } catch (fallbackException: any) {
               setError(OTP_SEND_HELP)

@@ -7,26 +7,35 @@ type Input = {
   resource_id: string
 }
 
-function json(status: number, body: unknown) {
+function json(origin: string | null, status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       'content-type': 'application/json; charset=utf-8',
-      'access-control-allow-origin': '*',
+      'access-control-allow-origin': origin ?? '*',
+      'vary': 'Origin',
       'access-control-allow-headers': 'authorization, x-client-info, apikey, content-type',
+      'access-control-allow-methods': 'POST, OPTIONS',
     },
   })
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return json(200, { ok: true })
-  if (req.method !== 'POST') return json(405, { error: 'Method not allowed' })
+  const reqOrigin = req.headers.get('Origin')
+  const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const corsOrigin = reqOrigin && allowedOrigins.length ? (allowedOrigins.includes(reqOrigin) ? reqOrigin : null) : '*'
+
+  if (req.method === 'OPTIONS') return json(corsOrigin, 200, { ok: true })
+  if (req.method !== 'POST') return json(corsOrigin, 405, { error: 'Método no permitido.' })
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
   const serviceKey = Deno.env.get('SERVICE_ROLE_KEY')
 
-  if (!supabaseUrl || !anonKey || !serviceKey) return json(500, { error: 'Missing Supabase env' })
+  if (!supabaseUrl || !anonKey || !serviceKey) return json(corsOrigin, 500, { error: 'Falta configuración de Supabase.' })
 
   const authHeader = req.headers.get('Authorization') ?? ''
 
@@ -36,10 +45,10 @@ Deno.serve(async (req) => {
 
   const { data: userData } = await userClient.auth.getUser()
   const userId = userData.user?.id
-  if (!userId) return json(401, { error: 'Unauthorized' })
+  if (!userId) return json(corsOrigin, 401, { error: 'No autenticado.' })
 
   const input = (await req.json()) as Input
-  if (!input?.bucket || !input?.path || !input?.resource_id) return json(400, { error: 'Invalid payload' })
+  if (!input?.bucket || !input?.path || !input?.resource_id) return json(corsOrigin, 400, { error: 'Solicitud inválida.' })
 
   const { data: fileRow, error: fileError } = await userClient
     .from('ticket_files')
@@ -47,12 +56,12 @@ Deno.serve(async (req) => {
     .eq('id', input.resource_id)
     .single()
 
-  if (fileError || !fileRow) return json(404, { error: 'Not found' })
-  if (fileRow.storage_bucket !== input.bucket || fileRow.storage_path !== input.path) return json(400, { error: 'Path mismatch' })
+  if (fileError || !fileRow) return json(corsOrigin, 404, { error: 'Recurso no encontrado.' })
+  if (fileRow.storage_bucket !== input.bucket || fileRow.storage_path !== input.path) return json(corsOrigin, 400, { error: 'Ruta inválida.' })
 
   const serviceClient = createClient(supabaseUrl, serviceKey)
   const { data: signed, error: signError } = await serviceClient.storage.from(input.bucket).createSignedUrl(input.path, 60)
-  if (signError || !signed?.signedUrl) return json(500, { error: 'Sign failed' })
+  if (signError || !signed?.signedUrl) return json(corsOrigin, 500, { error: 'No se pudo firmar la descarga.' })
 
   await serviceClient.from('audit_log').insert({
     org_id: fileRow.org_id,
@@ -63,5 +72,5 @@ Deno.serve(async (req) => {
     metadata: { filename: fileRow.filename, sha256: fileRow.sha256 },
   })
 
-  return json(200, { signed_url: signed.signedUrl, expires_in: 60 })
+  return json(corsOrigin, 200, { signed_url: signed.signedUrl, expires_in: 60 })
 })

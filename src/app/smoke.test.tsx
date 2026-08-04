@@ -264,9 +264,10 @@ describe('smoke', () => {
     authStateRef.current = { ...authStateRef.current, session: null, profile: null }
     supabaseMock.auth.signInWithPassword.mockReset()
     supabaseMock.auth.signInWithOtp.mockReset()
+    supabaseMock.auth.signUp.mockReset()
     supabaseMock.auth.signInWithPassword.mockResolvedValueOnce({ error: { message: 'Auth is disabled' } })
     supabaseMock.auth.signInWithOtp.mockResolvedValueOnce({ error: { message: 'email provider not configured' } })
-    supabaseMock.functions.invoke.mockResolvedValueOnce({ error: { message: 'unable' } })
+    supabaseMock.auth.signUp.mockResolvedValueOnce({ error: { message: 'Signups not allowed' } })
 
     render(
       <MemoryRouter>
@@ -279,18 +280,16 @@ describe('smoke', () => {
     fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'password123' } })
     fireEvent.click(screen.getByRole('button', { name: /enviar enlace mágico/i }))
 
-    expect(await screen.findByText(/configuración de Auth/i)).toBeInTheDocument()
+    expect(await screen.findByText(/no se pudo crear la cuenta/i)).toBeInTheDocument()
   })
 
-  it('crea el usuario directamente con contraseña cuando el enlace mágico falla', async () => {
+  it('crea el usuario con signUp cuando el enlace mágico falla', async () => {
     authStateRef.current = { ...authStateRef.current, session: null, profile: null }
     supabaseMock.auth.signInWithPassword.mockReset()
     supabaseMock.auth.signInWithOtp.mockReset()
-    supabaseMock.auth.signInWithPassword
-      .mockResolvedValueOnce({ error: { message: 'Auth is disabled' } })
-      .mockResolvedValueOnce({ data: { session: { user: { id: 'u2', email: 'user@test.local' } } }, error: null })
+    supabaseMock.auth.signInWithPassword.mockResolvedValueOnce({ error: { message: 'Auth is disabled' } })
     supabaseMock.auth.signInWithOtp.mockResolvedValueOnce({ error: { message: 'email provider not configured' } })
-    supabaseMock.functions.invoke.mockResolvedValueOnce({ data: { ok: true, user_id: 'u2' }, error: null })
+    supabaseMock.auth.signUp.mockResolvedValueOnce({ error: null })
 
     render(
       <MemoryRouter>
@@ -304,7 +303,7 @@ describe('smoke', () => {
     fireEvent.click(screen.getByRole('button', { name: /enviar enlace mágico/i }))
 
     expect(await screen.findByText(/cuenta creada/i)).toBeInTheDocument()
-    expect(supabaseMock.functions.invoke).toHaveBeenCalledWith('auth-create-user', expect.anything())
+    expect(supabaseMock.auth.signUp).toHaveBeenCalled()
   })
 
   it('usa un enlace mágico para el acceso cuando se intenta crear cuenta', async () => {

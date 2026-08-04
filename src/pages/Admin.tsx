@@ -191,6 +191,12 @@ export default function Admin() {
           <div className="flex gap-2">
             <Link
               className="h-9 rounded-lg border border-zinc-200 bg-white px-3 text-sm leading-9 text-zinc-900 hover:bg-zinc-100"
+              to="/admin/recuperacion"
+            >
+              Recuperación
+            </Link>
+            <Link
+              className="h-9 rounded-lg border border-zinc-200 bg-white px-3 text-sm leading-9 text-zinc-900 hover:bg-zinc-100"
               to="/admin/usuarios"
             >
               Usuarios

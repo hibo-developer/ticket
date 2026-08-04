@@ -19,7 +19,7 @@ PWA empresarial modular para gestionar tickets/recibos y gastos con adjuntos, pe
    - Está incluido en la migración (bucket privado `tickets-cotepa` + políticas sobre `storage.objects`).
 4. Despliega las Edge Functions:
    - [storage-sign-download](file:///c:/Oddo/supabase/functions/storage-sign-download/index.ts)
-   - [auth-create-user](file:///c:/Oddo/supabase/functions/auth-create-user/index.ts)
+  - [admin-create-user](file:///c:/Oddo/supabase/functions/admin-create-user/index.ts)
    - Variables requeridas en Supabase Functions:
      - `SUPABASE_URL`
      - `SUPABASE_ANON_KEY`
@@ -34,7 +34,7 @@ npm run dev
 ## Primer uso (setup)
 1. Entra en `/login` y usa la opción “Crear cuenta”.
 2. Introduce un correo válido y una contraseña fuerte.
-3. Si Supabase Auth no puede enviar el enlace mágico, la app intentará crear el usuario automáticamente mediante la Edge Function `auth-create-user` y después entrar con la contraseña.
+3. La creación de usuarios en producción se recomienda hacerla por invitación o desde Admin → Usuarios (admins), evitando el auto-registro sin control.
 4. Tras entrar, la app te redirige a `/setup` para crear la organización inicial y asignarte como administrador.
 5. En `/admin`:
    - Activa/desactiva módulos.
@@ -62,7 +62,7 @@ Para que el primer usuario pueda registrarse correctamente, revisa estas opcione
 - Auth > Settings > URL Configuration: define `Site URL` como `https://ticket-cotepa.netlify.app` en producción.
 - Auth > Settings > URL Configuration: añade `http://localhost:5173` para desarrollo y `https://ticket-cotepa.netlify.app` a la lista de `Redirect URLs`.
 - Auth > Settings > User signups: asegúrate de que el registro de usuarios esté permitido.
-- Si ves errores 400/429 al enviar el enlace mágico, la app intentará usar la Edge Function `auth-create-user`; si esa ruta falla, revisa el panel y el log de la función.
+- Si ves errores 400/429 al enviar el enlace mágico, revisa el proveedor de email de Supabase, URLs de redirección y rate limits. Para acceso por invitación, usa Admin → Usuarios.
 
 ## Seguridad (imágenes y datos)
 - Storage: bucket privado `tickets-cotepa` con políticas por organización (prefijo `org_<org_id>`).

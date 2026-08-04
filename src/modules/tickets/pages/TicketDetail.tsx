@@ -1,6 +1,7 @@
 import { useAuth } from '@/core/auth/AuthContext'
 import { supabase } from '@/core/auth/supabaseClient'
 import { appendAudit } from '@/core/audit/audit'
+import { buildReceiptFilename } from '@/core/files/receiptFilename'
 import { sanitizeFilename } from '@/core/files/sanitize'
 import { sha256HexFile } from '@/core/files/sha256'
 import { runReceiptOcr } from '@/core/ocr/receiptOcr'
@@ -22,6 +23,12 @@ function isAllowedType(file: File) {
   if (file.type === 'text/xml') return true
   if (file.type === 'application/xml') return true
   return false
+}
+
+function safeRandomId() {
+  const c = globalThis.crypto as Crypto | undefined
+  if (c && 'randomUUID' in c && typeof (c as any).randomUUID === 'function') return (c as any).randomUUID() as string
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
 export default function TicketDetail() {
@@ -123,11 +130,13 @@ export default function TicketDetail() {
     setOcrInfo(null)
 
     try {
+      let ocr: Awaited<ReturnType<typeof runReceiptOcr>> | null = null
+
       if (file.type.startsWith('image/')) {
         setOcrRunning(true)
         setOcrProgress(0)
         try {
-          const ocr = await runReceiptOcr(file, {
+          ocr = await runReceiptOcr(file, {
             onProgress: (p) => setOcrProgress(Math.max(0, Math.min(1, p))),
           })
 
@@ -154,8 +163,15 @@ export default function TicketDetail() {
       }
 
       const sha256 = await sha256HexFile(file)
-      const safeName = sanitizeFilename(file.name)
-      const objectPath = `org_${profile.org_id}/tickets/${id}/${crypto.randomUUID()}-${safeName}`
+      const safeName = file.type.startsWith('image/')
+        ? buildReceiptFilename({
+            date: ocr?.date ?? ticket?.ticket_date ?? null,
+            concept: (ocr?.vendor ?? ticket?.title ?? '').trim() || 'ticket',
+            originalName: file.name,
+            mimeType: file.type,
+          })
+        : sanitizeFilename(file.name)
+      const objectPath = `org_${profile.org_id}/tickets/${id}/${safeRandomId()}-${safeName}`
       const bucket = 'tickets-cotepa'
 
       const up = await supabase.storage.from(bucket).upload(objectPath, file, {

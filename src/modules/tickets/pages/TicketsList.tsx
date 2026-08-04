@@ -4,7 +4,7 @@ import { useAuth } from '@/core/auth/AuthContext'
 import { supabase } from '@/core/auth/supabaseClient'
 import { appendAudit } from '@/core/audit/audit'
 import { downloadBlob } from '@/core/files/download'
-import { sanitizeFilename } from '@/core/files/sanitize'
+import { buildReceiptFilename } from '@/core/files/receiptFilename'
 import { sha256HexFile } from '@/core/files/sha256'
 import { createZipBlob } from '@/core/files/zip'
 import { runReceiptOcr } from '@/core/ocr/receiptOcr'
@@ -112,22 +112,34 @@ export default function TicketsList() {
     setError(null)
 
     const parsedAmount = form.amount.trim() ? Number(form.amount) : null
-    const { error } = await supabase.from('tickets').insert({
-      org_id: profile.org_id,
-      owner_user_id: session.user.id,
-      title: form.title.trim(),
-      vendor: form.vendor.trim() ? form.vendor.trim() : null,
-      amount: parsedAmount !== null && Number.isFinite(parsedAmount) ? parsedAmount : null,
-      currency: 'EUR',
-      status: 'draft',
-    })
+    const res = await supabase
+      .from('tickets')
+      .insert({
+        org_id: profile.org_id,
+        owner_user_id: session.user.id,
+        title: form.title.trim(),
+        vendor: form.vendor.trim() ? form.vendor.trim() : null,
+        amount: parsedAmount !== null && Number.isFinite(parsedAmount) ? parsedAmount : null,
+        currency: 'EUR',
+        status: 'draft',
+      })
+      .select('id')
+      .single()
 
     setCreating(false)
 
-    if (error) {
-      setError(error.message)
+    if (res.error) {
+      setError(res.error.message)
       return
     }
+
+    await appendAudit({
+      org_id: profile.org_id,
+      action: 'TICKET_CREATE',
+      resource_type: 'ticket',
+      resource_id: res.data?.id ?? null,
+      metadata: { created_from: 'tickets_list' },
+    })
 
     setForm({ title: '', vendor: '', amount: '' })
     await load()
@@ -188,7 +200,12 @@ export default function TicketsList() {
       if (!ticketId) throw new Error('No se pudo crear el ticket.')
 
       const sha256 = await sha256HexFile(file)
-      const safeName = sanitizeFilename(file.name)
+      const safeName = buildReceiptFilename({
+        date: ocr?.date ?? null,
+        concept: title,
+        originalName: file.name,
+        mimeType: file.type,
+      })
       const objectPath = `org_${profile.org_id}/tickets/${ticketId}/${safeRandomId()}-${safeName}`
       const bucket = 'tickets-cotepa'
 

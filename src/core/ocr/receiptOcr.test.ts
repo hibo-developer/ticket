@@ -16,4 +16,25 @@ TOTAL 2,25 EUR
     expect(fields.date).toBe('2026-08-03')
     expect(fields.total).toBeCloseTo(2.25, 2)
   })
+
+  it('extrae total con separador punto', () => {
+    const text = `
+BAUHAUS
+04.08.2026
+Total en EUR 33.96
+`
+    const fields = extractReceiptFields(text)
+    expect(fields.vendor).toBe('BAUHAUS')
+    expect(fields.date).toBe('2026-08-04')
+    expect(fields.total).toBeCloseTo(33.96, 2)
+  })
+
+  it('extrae total con espacio entre enteros y decimales', () => {
+    const text = `
+TIENDA
+Total EUR: 33 96
+`
+    const fields = extractReceiptFields(text)
+    expect(fields.total).toBeCloseTo(33.96, 2)
+  })
 })

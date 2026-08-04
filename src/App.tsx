@@ -5,6 +5,7 @@ import { Permission } from '@/core/rbac/permissions'
 import { RequirePermissions } from '@/core/routing/RequirePermissions'
 import { RequireProfile } from '@/core/routing/RequireProfile'
 import Admin from '@/pages/Admin'
+import AdminTicketRecovery from '@/pages/AdminTicketRecovery'
 import AdminUsers from '@/pages/AdminUsers'
 import AdminViews from '@/pages/AdminViews'
 import Dashboard from '@/pages/Dashboard'
@@ -57,6 +58,14 @@ function AppRouter() {
           element: (
             <RequirePermissions required={[Permission.ViewsManage]}>
               <AdminViews />
+            </RequirePermissions>
+          ),
+        },
+        {
+          path: 'admin/recuperacion',
+          element: (
+            <RequirePermissions required={[Permission.AdminAccess]}>
+              <AdminTicketRecovery />
             </RequirePermissions>
           ),
         },
