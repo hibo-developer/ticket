@@ -70,7 +70,12 @@ Deno.serve(async (req) => {
     const { data: signed, error: signError } = await serviceClient.storage.from(input.bucket).createSignedUrl(input.path, 60)
     if (signError || !signed?.signedUrl) {
       console.error('storage-sign-download createSignedUrl failed', signError)
-      return json(corsOrigin, 500, { error: 'No se pudo firmar la descarga.' })
+      const message = signError?.message?.trim() || 'No se pudo firmar la descarga.'
+      const lower = message.toLowerCase()
+      if (lower.includes('not found') || lower.includes('no such') || lower.includes('does not exist')) {
+        return json(corsOrigin, 404, { error: `Archivo no encontrado en storage: ${message}` })
+      }
+      return json(corsOrigin, 500, { error: `No se pudo firmar la descarga: ${message}` })
     }
 
     const auditRes = await serviceClient.from('audit_log').insert({

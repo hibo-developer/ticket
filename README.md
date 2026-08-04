@@ -25,6 +25,17 @@ PWA empresarial modular para gestionar tickets/recibos y gastos con adjuntos, pe
      - `SUPABASE_ANON_KEY`
      - `SERVICE_ROLE_KEY`
 
+## Deploy automático (GitHub Actions)
+El repo incluye workflows para desplegar Supabase sin depender de un PC local:
+- Edge Functions: despliegue automático en cada push a `main` que toque `supabase/functions/**`.
+- Migraciones: despliegue manual desde GitHub Actions (workflow dispatch).
+
+### Secrets requeridos en GitHub
+GitHub → Settings → Secrets and variables → Actions → New repository secret:
+- `SUPABASE_ACCESS_TOKEN`: token de acceso (Dashboard → Account → Access Tokens).
+- `SUPABASE_PROJECT_REF`: el project ref (por ejemplo `guesvujkcaftqnhojzyr`).
+- `SUPABASE_DB_PASSWORD`: solo si vas a ejecutar el workflow de migraciones.
+
 ## Arranque
 ```bash
 npm install
