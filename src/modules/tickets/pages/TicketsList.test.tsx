@@ -1,8 +1,8 @@
 import TicketsList from '@/modules/tickets/pages/TicketsList'
 import { Permission } from '@/core/rbac/permissions'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 
 vi.mock('@/core/auth/AuthContext', () => ({
@@ -22,6 +22,7 @@ const insertTicket = vi.fn(() => ({
   }),
 }))
 const insertTicketFile = vi.fn().mockResolvedValue({ error: null })
+const uploadObject = vi.fn().mockResolvedValue({ data: null, error: null })
 const listTicketsResult = { data: [], error: null }
 
 const ticketsQuery: any = {
@@ -53,7 +54,7 @@ vi.mock('@/core/auth/supabaseClient', () => ({
     },
     storage: {
       from: () => ({
-        upload: vi.fn().mockResolvedValue({ data: null, error: null }),
+        upload: uploadObject,
       }),
     },
   },
@@ -72,6 +73,12 @@ vi.mock('@/core/audit/audit', () => ({
 }))
 
 describe('TicketsList', () => {
+  beforeEach(() => {
+    insertTicket.mockClear()
+    insertTicketFile.mockClear()
+    uploadObject.mockClear()
+  })
+
   it('crea un ticket', async () => {
     const user = userEvent.setup()
     render(
@@ -84,6 +91,39 @@ describe('TicketsList', () => {
     await user.click(screen.getByRole('button', { name: 'Crear' }))
 
     expect(insertTicket).toHaveBeenCalled()
+  })
+
+  it('al pulsar el botón de capturar dispara el selector de archivos', async () => {
+    const user = userEvent.setup()
+    const clickSpy = vi.spyOn(HTMLInputElement.prototype, 'click')
+
+    render(
+      <MemoryRouter>
+        <TicketsList />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getAllByRole('button', { name: 'Capturar ticket' })[0])
+    expect(clickSpy).toHaveBeenCalled()
+    clickSpy.mockRestore()
+  })
+
+  it('captura un ticket desde una imagen y sube el adjunto', async () => {
+    const user = userEvent.setup()
+
+    const { container } = render(
+      <MemoryRouter>
+        <TicketsList />
+      </MemoryRouter>,
+    )
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    const file = new File(['img'], 'ticket.jpg', { type: 'image/jpeg' })
+    await user.upload(input, file)
+
+    await waitFor(() => expect(insertTicket).toHaveBeenCalled())
+    await waitFor(() => expect(uploadObject).toHaveBeenCalled())
+    await waitFor(() => expect(insertTicketFile).toHaveBeenCalled())
   })
 
   it('muestra el botón para capturar tickets desde la lista', () => {

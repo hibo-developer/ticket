@@ -12,7 +12,7 @@ import { usePermissions } from '@/core/rbac/usePermissions'
 import { Permission } from '@/core/rbac/permissions'
 import { signDownloadUrl } from '@/core/storage/signedUrls'
 import { useViewLayout } from '@/core/views/useViewLayout'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 type TicketRow = {
@@ -46,6 +46,12 @@ function isAllowedType(file: File) {
   return false
 }
 
+function safeRandomId() {
+  const c = globalThis.crypto as Crypto | undefined
+  if (c && 'randomUUID' in c && typeof (c as any).randomUUID === 'function') return (c as any).randomUUID() as string
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
 export default function TicketsList() {
   const { profile, session } = useAuth()
   const { permissions } = usePermissions()
@@ -65,6 +71,7 @@ export default function TicketsList() {
 
   const canWrite = permissions.has(Permission.TicketsWrite)
   const canDownload = permissions.has(Permission.TicketsDownload)
+  const captureInputRef = useRef<HTMLInputElement>(null)
 
   const load = async () => {
     if (!profile?.org_id) {
@@ -182,7 +189,7 @@ export default function TicketsList() {
 
       const sha256 = await sha256HexFile(file)
       const safeName = sanitizeFilename(file.name)
-      const objectPath = `org_${profile.org_id}/tickets/${ticketId}/${crypto.randomUUID()}-${safeName}`
+      const objectPath = `org_${profile.org_id}/tickets/${ticketId}/${safeRandomId()}-${safeName}`
       const bucket = 'tickets-cotepa'
 
       const up = await supabase.storage.from(bucket).upload(objectPath, file, {
@@ -240,8 +247,10 @@ export default function TicketsList() {
             <div className="text-sm font-medium text-zinc-900">Crear ticket</div>
             <div className="mt-1 text-sm text-zinc-600">También puedes sacar la foto del ticket directamente desde aquí.</div>
           </div>
-          <label className="flex w-full cursor-pointer sm:w-auto">
+          <div className="flex w-full sm:w-auto">
             <input
+              ref={captureInputRef}
+              aria-label="Capturar ticket"
               className="hidden"
               type="file"
               accept="image/*"
@@ -253,10 +262,15 @@ export default function TicketsList() {
               }}
               disabled={!canWrite || captureBusy || creating}
             />
-            <Button type="button" className="w-full sm:w-auto" disabled={!canWrite || captureBusy || creating}>
+            <Button
+              type="button"
+              className="w-full sm:w-auto"
+              disabled={!canWrite || captureBusy || creating}
+              onClick={() => captureInputRef.current?.click()}
+            >
               {captureBusy ? 'Procesando foto…' : 'Capturar ticket'}
             </Button>
-          </label>
+          </div>
         </div>
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-4">
           {formLayout.fields

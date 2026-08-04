@@ -5,6 +5,54 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 describe('TicketFilesCard', () => {
+  it('al pulsar los botones dispara los selectores de archivos', async () => {
+    const user = userEvent.setup()
+    const onDownload = vi.fn()
+    const onUpload = vi.fn()
+    const clickSpy = vi.spyOn(HTMLInputElement.prototype, 'click')
+
+    render(
+      <TicketFilesCard
+        files={[]}
+        busy={false}
+        canWrite
+        canDownload={false}
+        error={null}
+        onUpload={onUpload}
+        onDownload={onDownload}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Capturar foto' }))
+    await user.click(screen.getByRole('button', { name: 'Subir archivo' }))
+    expect(clickSpy).toHaveBeenCalledTimes(2)
+    clickSpy.mockRestore()
+  })
+
+  it('dispara subida al seleccionar archivo', async () => {
+    const user = userEvent.setup()
+    const onDownload = vi.fn()
+    const onUpload = vi.fn()
+
+    const { container } = render(
+      <TicketFilesCard
+        files={[]}
+        busy={false}
+        canWrite
+        canDownload={false}
+        error={null}
+        onUpload={onUpload}
+        onDownload={onDownload}
+      />,
+    )
+
+    const inputs = container.querySelectorAll('input[type="file"]')
+    const input = inputs[inputs.length - 1] as HTMLInputElement
+    const file = new File(['x'], 'ticket.pdf', { type: 'application/pdf' })
+    await user.upload(input, file)
+    expect(onUpload).toHaveBeenCalledWith(file)
+  })
+
   it('dispara descarga', async () => {
     const user = userEvent.setup()
     const onDownload = vi.fn()
@@ -39,4 +87,3 @@ describe('TicketFilesCard', () => {
     expect(onDownload).toHaveBeenCalledWith(files[0])
   })
 })
-
