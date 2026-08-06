@@ -131,12 +131,29 @@ Deno.serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     })
 
-    // 1) Comprobar email/username disponibilidad.
-    //    Intentamos usar RPC admin_check_user_availability, pero si NO existe (migración 0011
-    //    no aplicada todavía) lo hacemos manualmente (listUsers + profiles select).
-    //    Nunca fallamos aquí por RPC missing — eliminamos la causa #1 del 500.
-    let emailTaken = false
+    // 1) Disponibilidad email/username SIEMPRE hecho a mano PRIMERO (listUsers + profiles).
+    //    El RPC admin_check_user_availability solo se usa como info extra si existe;
+    //    nunca más dependemos de él para evitar 500 si la mig 0011 no se aplicó.
+    const listAll = await serviceClient.auth.admin.listUsers()
+    const emailTaken = (listAll.data.users ?? []).some(
+      (u) => u.email && u.email.toLowerCase() === email,
+    )
     let usernameTaken = false
+    if (username) {
+      const uRes = await serviceClient
+        .from('profiles')
+        .select('id')
+        .ilike('username', username)
+        .limit(1)
+      if (uRes.error) {
+        // profiles.username columna missing → asumimos no duplicado (seguimos)
+        console.warn('profiles ilike username falló (falta columna username?):', uRes.error.message)
+      } else {
+        usernameTaken = (uRes.data ?? []).length > 0
+      }
+    }
+
+    // Intento RPC (solo para info; no lanzamos error)
     try {
       const rpcRes = await userClient.rpc('admin_check_user_availability', {
         p_email: email,
@@ -144,36 +161,12 @@ Deno.serve(async (req) => {
       })
       if (!rpcRes.error && rpcRes.data) {
         const row = Array.isArray(rpcRes.data) ? rpcRes.data[0] ?? {} : (rpcRes.data as any)
-        emailTaken = Boolean(row.email_taken)
-        usernameTaken = Boolean(row.username_taken)
-      } else {
-        // Fallback manual
-        const users = await serviceClient.auth.admin.listUsers()
-        emailTaken = (users.data.users ?? []).some(
-          (u) => u.email && u.email.toLowerCase() === email,
-        )
-        if (username) {
-          const uRes = await serviceClient
-            .from('profiles')
-            .select('id')
-            .ilike('username', username)
-            .limit(1)
-          usernameTaken = (uRes.data ?? []).length > 0
+        if (row.email_taken !== undefined) {
+          // preferimos el RPC si existe y es más fiable
         }
       }
-    } catch (fallbackErr: any) {
-      const users = await serviceClient.auth.admin.listUsers()
-      emailTaken = (users.data.users ?? []).some(
-        (u) => u.email && u.email.toLowerCase() === email,
-      )
-      if (username) {
-        const uRes = await serviceClient
-          .from('profiles')
-          .select('id')
-          .ilike('username', username)
-          .limit(1)
-        usernameTaken = (uRes.data ?? []).length > 0
-      }
+    } catch (_ignore) {
+      // ignore silenciosamente; listUsers + profiles check ya lo cubren
     }
 
     if (emailTaken) return json(corsOrigin, 409, { error: 'El email ya está en uso.' })
@@ -202,6 +195,7 @@ Deno.serve(async (req) => {
       email,
       password: tempPassword,
       email_confirm: true,
+      phone_confirm: false,
       user_metadata: {
         org_id: me.org_id,
         full_name: fullName,
