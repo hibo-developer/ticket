@@ -156,7 +156,24 @@ begin
 end;
 $$;
 
-revoke execute on function public.admin_check_user_availability(text) from public, anon;
-revoke execute on function public.admin_check_user_availability(text,text) from public, anon;
-grant  execute on function public.admin_check_user_availability(text) to authenticated, service_role;
-grant  execute on function public.admin_check_user_availability(text,text) to authenticated, service_role;
+do $$
+begin
+  -- Revoke y grant a ambas posibles firmas. Si alguna no existe ignoramos error
+  -- para que la migración sea 100% idempotente aunque Postgres registre 1 o 2 entradas.
+  begin
+    execute 'revoke execute on function public.admin_check_user_availability(text) from public, anon';
+  exception when others then null;
+  end;
+  begin
+    execute 'revoke execute on function public.admin_check_user_availability(text,text) from public, anon';
+  exception when others then null;
+  end;
+  begin
+    execute 'grant execute on function public.admin_check_user_availability(text) to authenticated, service_role';
+  exception when others then null;
+  end;
+  begin
+    execute 'grant execute on function public.admin_check_user_availability(text,text) to authenticated, service_role';
+  exception when others then null;
+  end;
+end $$;
