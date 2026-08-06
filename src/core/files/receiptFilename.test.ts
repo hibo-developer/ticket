@@ -21,5 +21,15 @@ describe('receiptFilename', () => {
     })
     expect(name.endsWith('.png')).toBe(true)
   })
+
+  it('limpia acentos y em-dash a ASCII seguro', () => {
+    const name = buildReceiptFilename({
+      date: '2026-08-06',
+      concept: 'Combustible — 1234ABC',
+      originalName: 'desayuno_café.jpeg',
+      mimeType: 'image/jpeg',
+    })
+    expect(name).toBe('2026-08-06-Combustible-1234ABC.jpg')
+  })
 })
 

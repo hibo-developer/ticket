@@ -12,7 +12,9 @@ function extFromMime(mime: string | null | undefined) {
 function extFromName(name: string | null | undefined) {
   const n = (name ?? '').trim()
   const m = /\.([a-z0-9]{2,6})$/i.exec(n)
-  return m ? m[1].toLowerCase() : null
+  const ext = m ? m[1].toLowerCase() : null
+  if (ext === 'jpeg') return 'jpg'
+  return ext
 }
 
 export function buildReceiptFilename(input: {
