@@ -127,25 +127,58 @@ Deno.serve(async (req) => {
         error: 'Nombre de usuario inválido (3-32, letras / números / . _ -).',
       })
 
-    const availability = await userClient.rpc('admin_check_user_availability', {
-      p_email: email,
-      p_username: username || null,
-    })
-
-    if (availability.error)
-      return json(corsOrigin, 500, {
-        error: `admin_check_user_availability falló. Aplica la migración 20260806_000011_bootstrap_prereqs_admin_create_user.sql en SQL Editor. Detalle: ${availability.error.message}`,
-      })
-
-    const emailTaken = Boolean((availability.data as any)?.email_taken)
-    const usernameTaken = Boolean((availability.data as any)?.username_taken)
-    if (emailTaken) return json(corsOrigin, 409, { error: 'El email ya está en uso.' })
-    if (username && usernameTaken)
-      return json(corsOrigin, 409, { error: 'El nombre de usuario ya está en uso.' })
-
     const serviceClient = createClient(supabaseUrl, serviceKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     })
+
+    // 1) Comprobar email/username disponibilidad.
+    //    Intentamos usar RPC admin_check_user_availability, pero si NO existe (migración 0011
+    //    no aplicada todavía) lo hacemos manualmente (listUsers + profiles select).
+    //    Nunca fallamos aquí por RPC missing — eliminamos la causa #1 del 500.
+    let emailTaken = false
+    let usernameTaken = false
+    try {
+      const rpcRes = await userClient.rpc('admin_check_user_availability', {
+        p_email: email,
+        p_username: username || null,
+      })
+      if (!rpcRes.error && rpcRes.data) {
+        const row = Array.isArray(rpcRes.data) ? rpcRes.data[0] ?? {} : (rpcRes.data as any)
+        emailTaken = Boolean(row.email_taken)
+        usernameTaken = Boolean(row.username_taken)
+      } else {
+        // Fallback manual
+        const users = await serviceClient.auth.admin.listUsers()
+        emailTaken = (users.data.users ?? []).some(
+          (u) => u.email && u.email.toLowerCase() === email,
+        )
+        if (username) {
+          const uRes = await serviceClient
+            .from('profiles')
+            .select('id')
+            .ilike('username', username)
+            .limit(1)
+          usernameTaken = (uRes.data ?? []).length > 0
+        }
+      }
+    } catch (fallbackErr: any) {
+      const users = await serviceClient.auth.admin.listUsers()
+      emailTaken = (users.data.users ?? []).some(
+        (u) => u.email && u.email.toLowerCase() === email,
+      )
+      if (username) {
+        const uRes = await serviceClient
+          .from('profiles')
+          .select('id')
+          .ilike('username', username)
+          .limit(1)
+        usernameTaken = (uRes.data ?? []).length > 0
+      }
+    }
+
+    if (emailTaken) return json(corsOrigin, 409, { error: 'El email ya está en uso.' })
+    if (username && usernameTaken)
+      return json(corsOrigin, 409, { error: 'El nombre de usuario ya está en uso.' })
 
     let validRoleIds: string[] = []
     if (roleIds.length > 0) {
