@@ -67,7 +67,7 @@ export default function Admin() {
         .from('expenses')
         .select('id, state, expense_date, total_amount, currency, category, vehicle_plate, created_at')
         .eq('org_id', profile.org_id)
-        .order('expense_date', { ascending: false, nullsFirst: false })
+        .order('expense_date', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(200),
       supabase
