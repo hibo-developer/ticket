@@ -1,5 +1,6 @@
 import { supabase } from '@/core/auth/supabaseClient'
 import { AllPermissions, type PermissionKey } from '@/core/rbac/permissions'
+import { onPermissionsInvalidated } from '@/core/rbac/permissionsInvalidate'
 import { useAuth } from '@/core/auth/AuthContext'
 import { useEffect, useMemo, useState } from 'react'
 
@@ -12,6 +13,11 @@ export function usePermissions(): PermissionsState {
   const { profile, session } = useAuth()
   const [loading, setLoading] = useState(true)
   const [permissions, setPermissions] = useState<Set<PermissionKey>>(new Set())
+  const [nonce, setNonce] = useState(0)
+
+  useEffect(() => {
+    return onPermissionsInvalidated(() => setNonce((n) => n + 1))
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -61,7 +67,7 @@ export function usePermissions(): PermissionsState {
     return () => {
       cancelled = true
     }
-  }, [session?.user?.id, profile?.app_role, profile?.active])
+  }, [session?.user?.id, profile?.app_role, profile?.active, nonce])
 
   return useMemo(() => ({ loading, permissions }), [loading, permissions])
 }

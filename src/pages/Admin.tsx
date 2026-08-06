@@ -6,6 +6,7 @@ import { supabase } from '@/core/auth/supabaseClient'
 import { getExpenseStateInfo } from '@/core/expenses/expenseStatus'
 import { allModules } from '@/core/modules/registry'
 import { AllPermissions, Permission, type PermissionKey } from '@/core/rbac/permissions'
+import { invalidatePermissions } from '@/core/rbac/permissionsInvalidate'
 import { usePermissions } from '@/core/rbac/usePermissions'
 import { signDownloadUrl } from '@/core/storage/signedUrls'
 import { getCategoryLabel } from '@/modules/expenses/pages/ExpensesList'
@@ -165,6 +166,76 @@ export default function Admin() {
 
   const [selectedRole, setSelectedRole] = useState<string>('')
   const selected = useMemo(() => roles.find((r) => r.id === selectedRole) ?? null, [roles, selectedRole])
+  const [editRoleName, setEditRoleName] = useState('')
+  const [editRoleDesc, setEditRoleDesc] = useState('')
+
+  useEffect(() => {
+    if (!selected) {
+      setEditRoleName('')
+      setEditRoleDesc('')
+      return
+    }
+    setEditRoleName(selected.name)
+    setEditRoleDesc(selected.description ?? '')
+  }, [selected?.id, selected?.name, selected?.description])
+
+  const updateSelectedRole = async () => {
+    if (!selectedRole || !profile?.org_id) return
+    const name = editRoleName.trim()
+    if (!name) return
+    setBusy(true)
+    setError(null)
+    setSuccess(null)
+
+    const { error } = await supabase
+      .from('roles')
+      .update({ name, description: editRoleDesc.trim() || null })
+      .eq('id', selectedRole)
+
+    setBusy(false)
+
+    if (error) {
+      setError(error.message)
+      return
+    }
+
+    setRoles((prev) =>
+      prev.map((r) =>
+        r.id === selectedRole
+          ? { ...r, name, description: editRoleDesc.trim() || null }
+          : r,
+      ),
+    )
+    setSuccess('Rol actualizado.')
+    invalidatePermissions()
+  }
+
+  const deleteSelectedRole = async () => {
+    if (!selectedRole || !profile?.org_id) return
+    const roleName = selected?.name ?? 'este rol'
+    const msg = `¿Eliminar el rol "${roleName}"? También se quitará de todos los usuarios.`
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      if (!window.confirm(msg)) return
+    }
+    setBusy(true)
+    setError(null)
+    setSuccess(null)
+
+    const { error } = await supabase.from('roles').delete().eq('id', selectedRole)
+
+    setBusy(false)
+
+    if (error) {
+      setError(error.message)
+      return
+    }
+
+    setRoles((prev) => prev.filter((r) => r.id !== selectedRole))
+    setSelectedRole('')
+    setRolePerms(new Set())
+    setSuccess('Rol eliminado.')
+    invalidatePermissions()
+  }
 
   const [rolePerms, setRolePerms] = useState<Set<PermissionKey>>(new Set())
 
@@ -197,6 +268,7 @@ export default function Admin() {
     if (!selectedRole) return
     setBusy(true)
     setError(null)
+    setSuccess(null)
 
     const has = rolePerms.has(permission)
 
@@ -217,6 +289,7 @@ export default function Admin() {
       else next.add(permission)
       return next
     })
+    invalidatePermissions()
   }
 
   const downloadReceipt = async (e: ExpenseRow, f: ExpenseFileRow) => {
@@ -394,7 +467,9 @@ export default function Admin() {
 
         <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
           <div className="text-sm font-medium text-zinc-900">Roles y permisos</div>
-          <div className="mt-2 text-sm text-zinc-600">Define roles y asigna permisos granulares.</div>
+          <div className="mt-2 text-sm text-zinc-600">
+            Crea roles, edítalos y asigna permisos granulares por rol. Los cambios aplican sin recarga.
+          </div>
 
           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
             <Input placeholder="Nombre rol" value={newRoleName} onChange={(e) => setNewRoleName(e.target.value)} />
@@ -421,18 +496,57 @@ export default function Admin() {
           </div>
 
           {selectedRole ? (
-            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {AllPermissions.map((p) => (
-                <button
-                  key={p}
-                  className="flex items-center justify-between rounded-xl border border-zinc-200 bg-white px-3 py-2 text-left text-sm hover:bg-zinc-50 disabled:opacity-60"
-                  disabled={busy}
-                  onClick={() => toggleRolePermission(p)}
-                >
-                  <span className="font-mono text-xs text-zinc-700">{p}</span>
-                  <span className="text-xs text-zinc-500">{rolePerms.has(p) ? 'ON' : 'OFF'}</span>
-                </button>
-              ))}
+            <div className="mt-4 space-y-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+              <div>
+                <div className="text-xs font-medium text-zinc-700">Datos del rol</div>
+                <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <Input placeholder="Nombre" value={editRoleName} onChange={(e) => setEditRoleName(e.target.value)} />
+                  <Input placeholder="Descripción" value={editRoleDesc} onChange={(e) => setEditRoleDesc(e.target.value)} />
+                  <div className="flex items-end gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={updateSelectedRole}
+                      disabled={busy || !editRoleName.trim() || (editRoleName.trim() === selected?.name && editRoleDesc.trim() === (selected?.description ?? ''))}
+                    >
+                      Guardar cambios
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="danger"
+                      onClick={() => void deleteSelectedRole()}
+                      disabled={busy}
+                    >
+                      Eliminar rol
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs font-medium text-zinc-700">Permisos</div>
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {AllPermissions.map((p) => (
+                    <button
+                      key={p}
+                      className="flex items-center justify-between rounded-xl border border-zinc-200 bg-white px-3 py-2 text-left text-sm hover:bg-zinc-50 disabled:opacity-60"
+                      disabled={busy}
+                      onClick={() => toggleRolePermission(p)}
+                    >
+                      <span className="font-mono text-xs text-zinc-700">{p}</span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                          rolePerms.has(p)
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-zinc-100 text-zinc-600'
+                        }`}
+                      >
+                        {rolePerms.has(p) ? 'ON' : 'OFF'}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           ) : null}
         </div>
