@@ -3,6 +3,7 @@ import { Input } from '@/components/ui/Input'
 import { appendAudit } from '@/core/audit/audit'
 import { useAuth } from '@/core/auth/AuthContext'
 import { supabase } from '@/core/auth/supabaseClient'
+import { getExpenseStateInfo } from '@/core/expenses/expenseStatus'
 import { allModules } from '@/core/modules/registry'
 import { AllPermissions, Permission, type PermissionKey } from '@/core/rbac/permissions'
 import { usePermissions } from '@/core/rbac/usePermissions'
@@ -22,6 +23,7 @@ type ExpenseRow = {
   currency: string | null
   category: string | null
   vehicle_plate: string | null
+  employee_user_id: string | null
   created_at: string
   files: ExpenseFileRow[]
 }
@@ -65,7 +67,7 @@ export default function Admin() {
       supabase.from('roles').select('id, name, description').eq('org_id', profile.org_id).order('name', { ascending: true }),
       supabase
         .from('expenses')
-        .select('id, state, expense_date, total_amount, currency, category, vehicle_plate, created_at')
+        .select('id, state, expense_date, total_amount, currency, category, vehicle_plate, employee_user_id, created_at')
         .eq('org_id', profile.org_id)
         .order('expense_date', { ascending: false })
         .order('created_at', { ascending: false })
@@ -267,6 +269,53 @@ export default function Admin() {
     else setSuccess(`Descargados ${ok} adjuntos (${failed} fallidos).`)
   }
 
+  const deleteExpense = async (e: ExpenseRow) => {
+    if (!canAdmin || !profile?.org_id) return
+    const msg =
+      '¿Eliminar el gasto? Esta acción no se puede deshacer y se borrarán también sus adjuntos.'
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      if (!window.confirm(msg)) return
+    }
+    setBusy(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const paths = e.files.map((f) => f.storage_path).filter(Boolean)
+      if (paths.length > 0) {
+        const bucket = e.files[0]?.storage_bucket || 'tickets-cotepa'
+        await supabase.storage.from(bucket).remove(paths)
+      }
+      const { error: delErr } = await supabase
+        .from('expenses')
+        .delete()
+        .eq('id', e.id)
+        .eq('org_id', profile.org_id)
+      if (delErr) throw delErr
+
+      await appendAudit({
+        org_id: profile.org_id,
+        action: 'EXPENSE_DELETE',
+        resource_type: 'expense',
+        resource_id: e.id,
+        metadata: {
+          category: e.category,
+          total_amount: e.total_amount,
+          vehicle_plate: e.vehicle_plate,
+          old_state: e.state,
+          employee_user_id: e.employee_user_id,
+          receipt_count: e.files.length,
+        },
+      })
+
+      setSuccess('Gasto eliminado.')
+      await load()
+    } catch (err: any) {
+      setError(err?.message ?? 'No se pudo eliminar el gasto.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const filtered = useMemo(() => {
     if (receiptFilter === 'with_receipt') return expenses.filter((e) => e.files.length > 0)
     if (receiptFilter === 'no_receipt') return expenses.filter((e) => e.files.length === 0)
@@ -449,8 +498,8 @@ export default function Admin() {
                     </td>
                     <td className="px-3 py-3 font-mono text-zinc-900">{e.vehicle_plate ?? '—'}</td>
                     <td className="px-3 py-3">
-                      <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs text-zinc-700">
-                        {e.state}
+                      <span className={getExpenseStateInfo(e.state).badgeClassName}>
+                        {getExpenseStateInfo(e.state).label}
                       </span>
                     </td>
                     <td className="px-3 py-3">
@@ -495,14 +544,34 @@ export default function Admin() {
                               Descargar todos
                             </Button>
                           ) : null}
+                          <Button
+                            type="button"
+                            variant="danger"
+                            size="sm"
+                            onClick={() => void deleteExpense(e)}
+                            disabled={busy || busyDownload != null}
+                          >
+                            Eliminar gasto
+                          </Button>
                         </div>
                       ) : (
-                        <Link
-                          className="inline-flex h-9 items-center rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 hover:bg-zinc-100"
-                          to={`/gastos/${e.id}`}
-                        >
-                          Gestionar
-                        </Link>
+                        <div className="flex flex-col items-end gap-1">
+                          <Link
+                            className="inline-flex h-9 items-center rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 hover:bg-zinc-100"
+                            to={`/gastos/${e.id}`}
+                          >
+                            Gestionar
+                          </Link>
+                          <Button
+                            type="button"
+                            variant="danger"
+                            size="sm"
+                            onClick={() => void deleteExpense(e)}
+                            disabled={busy}
+                          >
+                            Eliminar gasto
+                          </Button>
+                        </div>
                       )}
                     </td>
                   </tr>

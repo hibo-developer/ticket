@@ -1,8 +1,9 @@
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { appendAudit } from '@/core/audit/audit'
 import { useAuth } from '@/core/auth/AuthContext'
 import { supabase } from '@/core/auth/supabaseClient'
-import { appendAudit } from '@/core/audit/audit'
+import { getExpenseStateInfo } from '@/core/expenses/expenseStatus'
 import { compressImage } from '@/core/files/compressImage'
 import { buildReceiptFilename } from '@/core/files/receiptFilename'
 import { sha256HexBlob } from '@/core/files/sha256'
@@ -47,6 +48,7 @@ type ExpenseRow = {
   currency: string | null
   category: string | null
   vehicle_plate: string | null
+  employee_user_id: string | null
   has_receipt: boolean
 }
 
@@ -88,6 +90,66 @@ export default function ExpensesList() {
   const pendingExpenseIdRef = useRef<string | null>(null)
 
   const canWrite = permissions.has(Permission.ExpensesWrite)
+  const canApprove = permissions.has(Permission.ExpensesApprove)
+  const canDeleteExpense = (r: ExpenseRow) => {
+    if (!session?.user) return false
+    return canApprove || r.employee_user_id === session.user.id
+  }
+
+  const deleteExpense = async (r: ExpenseRow) => {
+    if (!canDeleteExpense(r)) return
+    if (!profile?.org_id) return
+    const confirmMsg =
+      '¿Eliminar el gasto? Esta acción no se puede deshacer y se borrarán también sus adjuntos.'
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      if (!window.confirm(confirmMsg)) return
+    }
+
+    setError(null)
+    setSuccess(null)
+    setUploadingFor(r.id)
+    try {
+      const { data: files } = await supabase
+        .from('expense_files')
+        .select('id, storage_bucket, storage_path')
+        .eq('expense_id', r.id)
+        .eq('org_id', profile.org_id)
+
+      const paths = ((files ?? []) as any[]).map((f) => f.storage_path).filter(Boolean)
+      if (paths.length > 0) {
+        const firstBucket = ((files ?? []) as any[])[0]?.storage_bucket || STORAGE_BUCKET
+        await supabase.storage.from(firstBucket).remove(paths)
+      }
+
+      const { error: delErr } = await supabase
+        .from('expenses')
+        .delete()
+        .eq('id', r.id)
+        .eq('org_id', profile.org_id)
+      if (delErr) throw delErr
+
+      await appendAudit({
+        org_id: profile.org_id,
+        action: 'EXPENSE_DELETE',
+        resource_type: 'expense',
+        resource_id: r.id,
+        metadata: {
+          category: r.category,
+          total_amount: r.total_amount,
+          vehicle_plate: r.vehicle_plate,
+          had_receipt: r.has_receipt,
+          receipt_count: paths.length,
+        },
+      })
+
+      setSuccess('Gasto eliminado.')
+      await load()
+    } catch (e: any) {
+      setError(e?.message ?? 'No se pudo eliminar el gasto.')
+    } finally {
+      setUploadingFor(null)
+    }
+  }
 
   const load = async () => {
     if (!profile?.org_id) {
@@ -99,7 +161,7 @@ export default function ExpensesList() {
     setLoading(true)
     const { data: expData, error: expErr } = await supabase
       .from('expenses')
-      .select('id, state, expense_date, total_amount, currency, category, vehicle_plate')
+      .select('id, state, expense_date, total_amount, currency, category, vehicle_plate, employee_user_id')
       .eq('org_id', profile.org_id)
       .order('created_at', { ascending: false })
       .limit(50)
@@ -481,8 +543,8 @@ export default function ExpensesList() {
                         if (c.key === 'state') {
                           return (
                             <td key={c.key} className="px-5 py-4">
-                              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-700">
-                                {r.state}
+                              <span className={getExpenseStateInfo(r.state).badgeClassName}>
+                                {getExpenseStateInfo(r.state).label}
                               </span>
                             </td>
                           )
@@ -534,6 +596,17 @@ export default function ExpensesList() {
                                 Subir foto
                               </Button>
                             </>
+                          ) : null}
+                          {canDeleteExpense(r) ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="danger"
+                              onClick={() => void deleteExpense(r)}
+                              disabled={uploadingFor !== null}
+                            >
+                              Eliminar
+                            </Button>
                           ) : null}
                         </div>
                       </td>

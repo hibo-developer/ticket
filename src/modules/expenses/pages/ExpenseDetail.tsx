@@ -1,16 +1,17 @@
 import { Button } from '@/components/ui/Button'
+import { appendAudit } from '@/core/audit/audit'
 import { useAuth } from '@/core/auth/AuthContext'
 import { supabase } from '@/core/auth/supabaseClient'
-import { appendAudit } from '@/core/audit/audit'
+import { getExpenseStateInfo } from '@/core/expenses/expenseStatus'
 import { compressImage } from '@/core/files/compressImage'
 import { buildReceiptFilename } from '@/core/files/receiptFilename'
 import { sha256HexBlob } from '@/core/files/sha256'
-import { signDownloadUrl } from '@/core/storage/signedUrls'
 import { Permission } from '@/core/rbac/permissions'
 import { usePermissions } from '@/core/rbac/usePermissions'
+import { signDownloadUrl } from '@/core/storage/signedUrls'
 import { EXPENSE_CATEGORIES, getCategoryLabel } from '@/modules/expenses/pages/ExpensesList'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 
 type Expense = {
   id: string
@@ -20,6 +21,7 @@ type Expense = {
   currency: string | null
   category: string | null
   vehicle_plate: string | null
+  employee_user_id: string | null
   created_at: string
 }
 
@@ -47,6 +49,7 @@ export default function ExpenseDetail() {
   const { id } = useParams()
   const { profile, session } = useAuth()
   const { permissions } = usePermissions()
+  const navigate = useNavigate()
 
   const [expense, setExpense] = useState<Expense | null>(null)
   const [files, setFiles] = useState<ExpenseFile[]>([])
@@ -61,6 +64,10 @@ export default function ExpenseDetail() {
   const canWrite = permissions.has(Permission.ExpensesWrite)
   const canApprove = permissions.has(Permission.ExpensesApprove)
   const canRead = permissions.has(Permission.ExpensesRead)
+  const canDelete =
+    !!expense &&
+    !!session?.user &&
+    (canApprove || expense.employee_user_id === session.user.id)
 
   const load = async () => {
     if (!id || !profile?.org_id) {
@@ -76,7 +83,7 @@ export default function ExpenseDetail() {
     const [eRes, fRes] = await Promise.all([
       supabase
         .from('expenses')
-        .select('id, state, expense_date, total_amount, currency, category, vehicle_plate, created_at')
+        .select('id, state, expense_date, total_amount, currency, category, vehicle_plate, employee_user_id, created_at')
         .eq('id', id)
         .eq('org_id', profile.org_id)
         .single(),
@@ -252,11 +259,58 @@ export default function ExpenseDetail() {
         metadata: { old_state: expense.state, new_state: newState },
       })
 
-      setSuccess(`Estado actualizado a "${newState}".`)
+      setSuccess(`Estado actualizado a "${getExpenseStateInfo(newState).label}".`)
       await load()
     } catch (e: any) {
       setError(e?.message ?? 'No se pudo actualizar el estado.')
     } finally {
+      setBusy(false)
+    }
+  }
+
+  const deleteExpense = async () => {
+    if (!id || !expense || !profile?.org_id) return
+    if (!canDelete) return
+    const msg =
+      '¿Eliminar el gasto? Esta acción no se puede deshacer y se borrarán también sus adjuntos.'
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      if (!window.confirm(msg)) return
+    }
+
+    setBusy(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const paths = files.map((f) => f.storage_path).filter(Boolean)
+      if (paths.length > 0) {
+        const bucket = files[0]?.storage_bucket || STORAGE_BUCKET
+        await supabase.storage.from(bucket).remove(paths)
+      }
+      const { error: delErr } = await supabase
+        .from('expenses')
+        .delete()
+        .eq('id', id)
+        .eq('org_id', profile.org_id)
+      if (delErr) throw delErr
+
+      await appendAudit({
+        org_id: profile.org_id,
+        action: 'EXPENSE_DELETE',
+        resource_type: 'expense',
+        resource_id: id,
+        metadata: {
+          category: expense.category,
+          total_amount: expense.total_amount,
+          vehicle_plate: expense.vehicle_plate,
+          receipt_count: paths.length,
+          old_state: expense.state,
+        },
+      })
+
+      setSuccess('Gasto eliminado.')
+      setTimeout(() => navigate('/gastos'), 700)
+    } catch (e: any) {
+      setError(e?.message ?? 'No se pudo eliminar el gasto.')
       setBusy(false)
     }
   }
@@ -309,6 +363,11 @@ export default function ExpenseDetail() {
                 Rechazar
               </Button>
             ) : null}
+            {canDelete ? (
+              <Button type="button" variant="danger" onClick={() => void deleteExpense()} disabled={busy}>
+                Eliminar gasto
+              </Button>
+            ) : null}
           </div>
         </div>
       </div>
@@ -320,8 +379,8 @@ export default function ExpenseDetail() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-sm font-medium text-zinc-900">Datos del gasto</div>
           <div>
-            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs text-zinc-700">
-              Estado: {expense.state}
+            <span className={getExpenseStateInfo(expense.state).badgeClassName}>
+              Estado: {getExpenseStateInfo(expense.state).label}
             </span>
           </div>
         </div>

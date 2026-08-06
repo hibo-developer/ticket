@@ -13,11 +13,49 @@ function json(origin: string | null, status: number, body: unknown) {
     headers: {
       'content-type': 'application/json; charset=utf-8',
       'access-control-allow-origin': origin ?? '*',
-      'vary': 'Origin',
+      vary: 'Origin',
       'access-control-allow-headers': 'authorization, x-client-info, apikey, content-type',
       'access-control-allow-methods': 'POST, OPTIONS',
     },
   })
+}
+
+type FileRow = {
+  id: string
+  org_id: string
+  filename: string
+  storage_bucket: string
+  storage_path: string
+  sha256: string | null
+}
+
+async function lookupFile(
+  client: ReturnType<typeof createClient>,
+  input: Input,
+): Promise<{ row: FileRow | null; action: string; resourceType: string }> {
+  const resourceType = (input.resource_type ?? '').toLowerCase()
+  if (resourceType.startsWith('expense_file') || resourceType.startsWith('expense')) {
+    const { data, error } = await client
+      .from('expense_files')
+      .select('id, org_id, filename, storage_bucket, storage_path, sha256')
+      .eq('id', input.resource_id)
+      .maybeSingle()
+    return {
+      row: error ? null : ((data as FileRow | null) ?? null),
+      action: 'EXPENSE_RECEIPT_DOWNLOAD',
+      resourceType: 'expense_file',
+    }
+  }
+  const { data, error } = await client
+    .from('ticket_files')
+    .select('id, org_id, filename, storage_bucket, storage_path, sha256')
+    .eq('id', input.resource_id)
+    .maybeSingle()
+  return {
+    row: error ? null : ((data as FileRow | null) ?? null),
+    action: 'TICKET_FILE_DOWNLOAD',
+    resourceType: 'ticket_file',
+  }
 }
 
 Deno.serve(async (req) => {
@@ -26,7 +64,8 @@ Deno.serve(async (req) => {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-  const corsOrigin = reqOrigin && allowedOrigins.length ? (allowedOrigins.includes(reqOrigin) ? reqOrigin : null) : '*'
+  const corsOrigin =
+    reqOrigin && allowedOrigins.length ? (allowedOrigins.includes(reqOrigin) ? reqOrigin : null) : '*'
 
   try {
     if (req.method === 'OPTIONS') return json(corsOrigin, 200, { ok: true })
@@ -36,7 +75,8 @@ Deno.serve(async (req) => {
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
-    if (!supabaseUrl || !anonKey || !serviceKey) return json(corsOrigin, 500, { error: 'Falta configuración de Supabase.' })
+    if (!supabaseUrl || !anonKey || !serviceKey)
+      return json(corsOrigin, 500, { error: 'Falta configuración de Supabase.' })
 
     const authHeader = req.headers.get('Authorization') ?? ''
 
@@ -55,19 +95,18 @@ Deno.serve(async (req) => {
       return json(corsOrigin, 400, { error: 'Solicitud inválida.' })
     }
 
-    if (!input?.bucket || !input?.path || !input?.resource_id) return json(corsOrigin, 400, { error: 'Solicitud inválida.' })
+    if (!input?.bucket || !input?.path || !input?.resource_id)
+      return json(corsOrigin, 400, { error: 'Solicitud inválida.' })
 
-    const { data: fileRow, error: fileError } = await userClient
-      .from('ticket_files')
-      .select('id, org_id, filename, storage_bucket, storage_path, sha256')
-      .eq('id', input.resource_id)
-      .single()
-
-    if (fileError || !fileRow) return json(corsOrigin, 404, { error: 'Recurso no encontrado.' })
-    if (fileRow.storage_bucket !== input.bucket || fileRow.storage_path !== input.path) return json(corsOrigin, 400, { error: 'Ruta inválida.' })
+    const lookup = await lookupFile(userClient, input)
+    if (!lookup.row) return json(corsOrigin, 404, { error: 'Recurso no encontrado.' })
+    if (lookup.row.storage_bucket !== input.bucket || lookup.row.storage_path !== input.path)
+      return json(corsOrigin, 400, { error: 'Ruta inválida.' })
 
     const serviceClient = createClient(supabaseUrl, serviceKey)
-    const { data: signed, error: signError } = await serviceClient.storage.from(input.bucket).createSignedUrl(input.path, 60)
+    const { data: signed, error: signError } = await serviceClient.storage
+      .from(input.bucket)
+      .createSignedUrl(input.path, 60)
     if (signError || !signed?.signedUrl) {
       console.error('storage-sign-download createSignedUrl failed', signError)
       const message = signError?.message?.trim() || 'No se pudo firmar la descarga.'
@@ -79,12 +118,12 @@ Deno.serve(async (req) => {
     }
 
     const auditRes = await serviceClient.from('audit_log').insert({
-      org_id: fileRow.org_id,
+      org_id: lookup.row.org_id,
       actor_user_id: userId,
-      action: 'TICKET_FILE_DOWNLOAD',
-      resource_type: 'ticket_file',
-      resource_id: fileRow.id,
-      metadata: { filename: fileRow.filename, sha256: fileRow.sha256 },
+      action: lookup.action,
+      resource_type: lookup.resourceType,
+      resource_id: lookup.row.id,
+      metadata: { filename: lookup.row.filename, sha256: lookup.row.sha256 },
     })
 
     if (auditRes.error) {
