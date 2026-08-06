@@ -131,8 +131,12 @@ after insert on auth.users
 for each row
 execute function public.handle_new_user();
 
--- 3) RPC admin_check_user_availability (si faltara en remoto, lo creamos idempotente)
-create or replace function public.admin_check_user_availability(p_email text, p_username text default null)
+-- 3) RPC admin_check_user_availability (idempotente: drop + create para evitar 42P13 por cambio retorno)
+--    Dropeamos firma con 1 y 2 args por si existía variante con DEFAULT en producción
+drop function if exists public.admin_check_user_availability(text);
+drop function if exists public.admin_check_user_availability(text,text);
+
+create function public.admin_check_user_availability(p_email text, p_username text default null)
 returns table(email_taken boolean, username_taken boolean)
 language plpgsql
 security definer
@@ -152,5 +156,7 @@ begin
 end;
 $$;
 
+revoke execute on function public.admin_check_user_availability(text) from public, anon;
 revoke execute on function public.admin_check_user_availability(text,text) from public, anon;
+grant  execute on function public.admin_check_user_availability(text) to authenticated, service_role;
 grant  execute on function public.admin_check_user_availability(text,text) to authenticated, service_role;
