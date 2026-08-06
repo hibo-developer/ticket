@@ -1,4 +1,10 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.0'
+// NOTA: no hay imports top-level. Cargamos todo con dynamic import() dentro del handler.
+// Esto evita 500 CUERPO VACÍO de Supabase runtime si falla la descarga del módulo desde esm.sh
+// en cold start (DNS, red, blacklist, etc.). En ese caso nuestro catch devuelve JSON detallado.
+
+type SupabaseModule = {
+  createClient: (url: string, key: string, opts?: any) => any
+}
 
 type Input = {
   email: string
@@ -17,7 +23,7 @@ function json(origin: string | null, status: number, body: unknown) {
       'access-control-allow-origin': origin ?? '*',
       vary: 'Origin',
       'access-control-allow-headers': 'authorization, x-client-info, apikey, content-type',
-      'access-control-allow-methods': 'POST, OPTIONS',
+      'access-control-allow-methods': 'GET, POST, OPTIONS',
     },
   })
 }
@@ -25,65 +31,143 @@ function json(origin: string | null, status: number, body: unknown) {
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase()
 }
-
 function normalizeUsername(username: string) {
   return username.trim()
 }
-
 function validPassword(pw: string) {
-  if (pw.length < 10) return false
-  if (!/[a-z]/i.test(pw)) return false
-  if (!/\d/.test(pw)) return false
-  return true
+  return pw.length >= 10 && /[a-z]/i.test(pw) && /\d/.test(pw)
 }
-
 function validUsername(u: string) {
-  if (u.length < 3 || u.length > 32) return false
-  if (!/^[a-zA-Z0-9._-]+$/.test(u)) return false
-  return true
+  return u.length >= 3 && u.length <= 32 && /^[a-zA-Z0-9._-]+$/.test(u)
 }
 
-Deno.serve(async (req) => {
+function corsOriginFor(req: Request): string | null {
   const reqOrigin = req.headers.get('Origin')
   const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') ?? '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-  const corsOrigin =
-    reqOrigin && allowedOrigins.length
-      ? allowedOrigins.includes(reqOrigin)
-        ? reqOrigin
-        : null
-      : '*'
+  if (!reqOrigin || allowedOrigins.length === 0) return '*'
+  return allowedOrigins.includes(reqOrigin) ? reqOrigin : null
+}
+
+async function loadSupabaseModule(): Promise<SupabaseModule> {
+  const mod = await import('https://esm.sh/@supabase/supabase-js@2.57.0')
+  return { createClient: mod.createClient }
+}
+
+async function runHealth(req: Request, co: string | null, mod: SupabaseModule): Promise<Response> {
+  const checks: Record<string, any> = {}
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
+  const serviceKey = Deno.env.get('SERVICE_ROLE_KEY')
+
+  checks.supabase_url = supabaseUrl ? `set (${supabaseUrl.length} chars)` : 'missing'
+  checks.anon_key = anonKey ? `set (${anonKey.length} chars, starts ${anonKey.slice(0, 8)})` : 'missing'
+  checks.service_role_key = serviceKey
+    ? `set (${serviceKey.length} chars, starts ${serviceKey.slice(0, 8)})`
+    : 'missing'
+
+  if (!supabaseUrl || !anonKey || !serviceKey) {
+    checks.verdict = 'ERROR: faltan Secrets. Ve a Edge Functions → cada función → Secrets y define SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY.'
+    return json(co, 500, checks)
+  }
 
   try {
-    if (req.method === 'OPTIONS') return json(corsOrigin, 200, { ok: true })
-    if (req.method !== 'POST') return json(corsOrigin, 405, { error: 'Método no permitido.' })
+    const serviceClient = mod.createClient(supabaseUrl, serviceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    })
+    const users = await serviceClient.auth.admin.listUsers()
+    checks.list_users_ok = true
+    checks.count_users = users.data.users?.length ?? 0
+  } catch (e: any) {
+    checks.list_users_ok = false
+    checks.list_users_error = e?.message ?? String(e)
+  }
+
+  try {
+    const serviceClient = mod.createClient(supabaseUrl, serviceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    })
+    const col = await serviceClient
+      .from('profiles')
+      .select('username,app_role,org_id')
+      .limit(1)
+    checks.profiles_cols_ok = true
+    checks.profiles_sample_rows = col.data?.length ?? 0
+  } catch (e: any) {
+    checks.profiles_cols_ok = false
+    checks.profiles_error = e?.message ?? String(e)
+    checks.hint =
+      'Posible falta columna username en public.profiles. Aplica migración 20260806_000011_bootstrap_prereqs_admin_create_user.sql en SQL Editor.'
+  }
+
+  try {
+    const userClient = mod.createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } },
+    })
+    const rpc = await userClient.rpc('admin_check_user_availability', {
+      p_email: 'test@example.com',
+      p_username: 'test',
+    })
+    checks.rpc_admin_check_exists = !rpc.error
+    if (rpc.error) checks.rpc_admin_check_error = rpc.error.message
+  } catch (e: any) {
+    checks.rpc_admin_check_exists = false
+    checks.rpc_admin_check_error = e?.message ?? String(e)
+  }
+
+  checks.verdict =
+    checks.list_users_ok && checks.profiles_cols_ok
+      ? 'OK. Edge function y setup funcionan. Vuelve a /admin/usuarios y prueba Crear usuario.'
+      : 'Hay errores en los checks. Solucionalos y vuelve a probar /health.'
+
+  return json(co, 200, checks)
+}
+
+Deno.serve(async (req) => {
+  const co = corsOriginFor(req)
+
+  try {
+    const mod = await loadSupabaseModule()
+
+    if (req.method === 'OPTIONS') return json(co, 200, { ok: true })
+
+    if (req.method === 'GET') {
+      const url = new URL(req.url)
+      if (url.pathname.endsWith('/health') || url.searchParams.get('health') === '1') {
+        return runHealth(req, co, mod)
+      }
+      return json(co, 404, { error: 'GET solo soportado en /health?1' })
+    }
+
+    if (req.method !== 'POST')
+      return json(co, 405, { error: 'Método no permitido (usa POST Crear o GET /health?1).' })
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
     const serviceKey = Deno.env.get('SERVICE_ROLE_KEY')
 
     if (!supabaseUrl || !anonKey || !serviceKey)
-      return json(corsOrigin, 500, {
+      return json(co, 500, {
         error:
-          'Falta configuración de Supabase. Ve a Dashboard → Edge Functions → Secrets y define SUPABASE_URL, SUPABASE_ANON_KEY y SERVICE_ROLE_KEY.',
+          'Falta Secrets en esta Edge Function. Ve a Dashboard → Edge Functions → admin-create-user → Secrets y define SUPABASE_URL, SUPABASE_ANON_KEY y SERVICE_ROLE_KEY. Luego redeploya.',
+        hint:
+          'Puedes diagnosticar abriendo en navegador: https://guesvujkcaftqnhojzyr.supabase.co/functions/v1/admin-create-user/health',
       })
 
     const authHeader = req.headers.get('Authorization') ?? ''
 
-    const userClient = createClient(supabaseUrl, anonKey, {
+    const userClient = mod.createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     })
 
     const { data: userData, error: whoamiErr } = await userClient.auth.getUser()
     if (whoamiErr)
-      return json(corsOrigin, 401, {
-        error: `Token inválido o expirado: ${whoamiErr.message}`,
-      })
+      return json(co, 401, { error: `Token inválido o expirado: ${whoamiErr.message}` })
 
     const userId = userData.user?.id
-    if (!userId) return json(corsOrigin, 401, { error: 'No autenticado.' })
+    if (!userId) return json(co, 401, { error: 'No autenticado.' })
 
     const { data: me, error: meError } = await userClient
       .from('profiles')
@@ -92,21 +176,19 @@ Deno.serve(async (req) => {
       .single()
 
     if (meError || !me?.org_id)
-      return json(corsOrigin, 403, {
+      return json(co, 403, {
         error:
           'No autorizado: tu perfil no existe o no perteneces a una organización. Crea una organización primero con Setup.',
       })
-    if (!me.active) return json(corsOrigin, 403, { error: 'Tu cuenta está desactivada.' })
+    if (!me.active) return json(co, 403, { error: 'Tu cuenta está desactivada.' })
     if (me.app_role !== 'admin')
-      return json(corsOrigin, 403, {
-        error: 'No autorizado: necesitas app_role=admin en tu perfil.',
-      })
+      return json(co, 403, { error: 'No autorizado: necesitas app_role=admin en tu perfil.' })
 
     let input: Input
     try {
       input = (await req.json()) as Input
     } catch {
-      return json(corsOrigin, 400, { error: 'Cuerpo JSON inválido.' })
+      return json(co, 400, { error: 'Cuerpo JSON inválido.' })
     }
     const email = normalizeEmail(input?.email ?? '')
     const fullName = (input?.full_name ?? '').trim() || null
@@ -117,26 +199,23 @@ Deno.serve(async (req) => {
       ? input.role_ids.filter((x) => typeof x === 'string' && x.length > 0)
       : []
 
-    if (!email || !email.includes('@')) return json(corsOrigin, 400, { error: 'Email inválido.' })
+    if (!email || !email.includes('@')) return json(co, 400, { error: 'Email inválido.' })
     if (!validPassword(tempPassword))
-      return json(corsOrigin, 400, {
+      return json(co, 400, {
         error: 'Contraseña temporal débil: mínimo 10 caracteres, letras + números.',
       })
     if (username && !validUsername(username))
-      return json(corsOrigin, 400, {
+      return json(co, 400, {
         error: 'Nombre de usuario inválido (3-32, letras / números / . _ -).',
       })
 
-    const serviceClient = createClient(supabaseUrl, serviceKey, {
+    const serviceClient = mod.createClient(supabaseUrl, serviceKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     })
 
-    // 1) Disponibilidad email/username SIEMPRE hecho a mano PRIMERO (listUsers + profiles).
-    //    El RPC admin_check_user_availability solo se usa como info extra si existe;
-    //    nunca más dependemos de él para evitar 500 si la mig 0011 no se aplicó.
     const listAll = await serviceClient.auth.admin.listUsers()
     const emailTaken = (listAll.data.users ?? []).some(
-      (u) => u.email && u.email.toLowerCase() === email,
+      (u: any) => u.email && u.email.toLowerCase() === email,
     )
     let usernameTaken = false
     if (username) {
@@ -146,32 +225,27 @@ Deno.serve(async (req) => {
         .ilike('username', username)
         .limit(1)
       if (uRes.error) {
-        // profiles.username columna missing → asumimos no duplicado (seguimos)
-        console.warn('profiles ilike username falló (falta columna username?):', uRes.error.message)
+        console.warn(
+          'profiles ilike username falló (posible falta columna username?):',
+          uRes.error.message,
+        )
       } else {
         usernameTaken = (uRes.data ?? []).length > 0
       }
     }
 
-    // Intento RPC (solo para info; no lanzamos error)
     try {
-      const rpcRes = await userClient.rpc('admin_check_user_availability', {
+      await userClient.rpc('admin_check_user_availability', {
         p_email: email,
         p_username: username || null,
       })
-      if (!rpcRes.error && rpcRes.data) {
-        const row = Array.isArray(rpcRes.data) ? rpcRes.data[0] ?? {} : (rpcRes.data as any)
-        if (row.email_taken !== undefined) {
-          // preferimos el RPC si existe y es más fiable
-        }
-      }
     } catch (_ignore) {
-      // ignore silenciosamente; listUsers + profiles check ya lo cubren
+      // ignore; listUsers + profiles ya cubren
     }
 
-    if (emailTaken) return json(corsOrigin, 409, { error: 'El email ya está en uso.' })
+    if (emailTaken) return json(co, 409, { error: 'El email ya está en uso.' })
     if (username && usernameTaken)
-      return json(corsOrigin, 409, { error: 'El nombre de usuario ya está en uso.' })
+      return json(co, 409, { error: 'El nombre de usuario ya está en uso.' })
 
     let validRoleIds: string[] = []
     if (roleIds.length > 0) {
@@ -181,14 +255,13 @@ Deno.serve(async (req) => {
         .eq('org_id', me.org_id)
         .in('id', roleIds)
       if (roleRes.error)
-        return json(corsOrigin, 500, {
-          error: `Roles lookup falló: ${roleRes.error.message}. Revisa que existan roles en la tabla roles de tu organización y que tengan org_id=${me.org_id}.`,
+        return json(co, 500, {
+          error: `Roles lookup falló: ${roleRes.error.message}.`,
+          hint: `Crea primero roles en la tabla roles de tu organización (org_id=${me.org_id}).`,
         })
       validRoleIds = Array.from(new Set((roleRes.data ?? []).map((r: any) => String(r.id))))
       if (validRoleIds.length !== roleIds.length)
-        return json(corsOrigin, 400, {
-          error: 'Algún role_id no pertenece a esta organización.',
-        })
+        return json(co, 400, { error: 'Algún role_id no pertenece a esta organización.' })
     }
 
     const created = await serviceClient.auth.admin.createUser({
@@ -206,16 +279,14 @@ Deno.serve(async (req) => {
     })
 
     if (created.error)
-      return json(corsOrigin, 500, {
-        error: `No se pudo crear auth user: ${created.error.message}. Causas comunes: email duplicado en auth.users (prueba otro email), o el dominio está bloqueado en Auth > Rate limits.`,
+      return json(co, 500, {
+        error: `No se pudo crear auth user: ${created.error.message}.`,
+        hint: 'Causas comunes: email duplicado en auth.users; dominio bloqueado en Auth → Rate limits; necesitas añadir Redirect URL en Authentication → URL Configuration.',
       })
 
     const newUserId = created.data.user?.id
-    if (!newUserId) return json(corsOrigin, 500, { error: 'Auth admin no devolvió user_id.' })
+    if (!newUserId) return json(co, 500, { error: 'Auth admin no devolvió user_id.' })
 
-    // Ahora usamos UPSERT con service_role (salta RLS).
-    // - Si el trigger on_auth_user_created insertó perfil → do update.
-    // - Si el trigger NO existe o tarda demasiado → insertamos aquí mismo con org_id garantizado.
     const upsertRes = await serviceClient
       .from('profiles')
       .upsert(
@@ -230,14 +301,15 @@ Deno.serve(async (req) => {
         { onConflict: 'id', ignoreDuplicates: false },
       )
     if (upsertRes.error)
-      return json(corsOrigin, 500, {
-        error: `profiles UPSERT falló: ${upsertRes.error.message}. Asegúrate de haber aplicado la migración 20260806_000011 (agrega username columna + trigger handle_new_user).`,
+      return json(co, 500, {
+        error: `profiles UPSERT falló: ${upsertRes.error.message}.`,
+        hint: 'Falta columna username en public.profiles? Aplica migración 20260806_000011_bootstrap_prereqs_admin_create_user.sql en SQL Editor.',
       })
 
     if (validRoleIds.length > 0) {
       const delRes = await serviceClient.from('user_roles').delete().eq('user_id', newUserId)
       if (delRes.error)
-        return json(corsOrigin, 500, {
+        return json(co, 500, {
           error: `user_roles DELETE prev falló: ${delRes.error.message}`,
         })
 
@@ -245,7 +317,7 @@ Deno.serve(async (req) => {
         .from('user_roles')
         .insert(validRoleIds.map((rid) => ({ user_id: newUserId, role_id: rid })))
       if (insRes.error)
-        return json(corsOrigin, 500, {
+        return json(co, 500, {
           error: `user_roles INSERT falló: ${insRes.error.message}`,
         })
     }
@@ -268,14 +340,16 @@ Deno.serve(async (req) => {
       console.warn('audit USER_CREATE failed:', auditErr?.message ?? auditErr)
     }
 
-    return json(corsOrigin, 200, { ok: true, user_id: newUserId })
+    return json(co, 200, { ok: true, user_id: newUserId })
   } catch (topErr: any) {
     const msg = topErr?.message ?? String(topErr ?? 'error desconocido')
     const stack = topErr?.stack ? String(topErr.stack).slice(0, 500) : undefined
-    return json(corsOrigin, 500, {
+    return json(co, 500, {
       error: 'admin-create-user EXCEPTION (top-level)',
       detail: msg,
       stack,
+      hint:
+        'Si "detail" es un error de red/esm.sh, prueba a redeployar. También puedes diagnosticar con GET /health?1.',
     })
   }
 })
