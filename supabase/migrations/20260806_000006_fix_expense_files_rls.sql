@@ -49,15 +49,7 @@ using (
       and p.org_id = expense_files.org_id
   )
   and (
-    exists (
-      select 1
-      from public.user_roles ur
-      join public.roles r on r.id = ur.role_id
-      join public.role_permissions rp on rp.role_id = r.id
-      where ur.user_id = auth.uid()
-        and r.org_id = expense_files.org_id
-        and rp.permission = 'Administration'
-    )
+    private.is_admin()
     or exists (
       select 1
       from public.expenses e
