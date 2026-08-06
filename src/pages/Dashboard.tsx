@@ -21,16 +21,18 @@ export default function Dashboard() {
 
       setLoading(true)
 
-      const [ticketsCount, expensesCount] = await Promise.all([
-        supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id).is('deleted_at', null).neq('status', 'draft'),
+      const [expensesCount, expensesSum] = await Promise.all([
         supabase.from('expenses').select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id),
+        supabase.from('expenses').select('total_amount').eq('org_id', profile.org_id),
       ])
 
       if (cancelled) return
 
+      const sum = (expensesSum.data ?? []).reduce((acc: number, r: any) => acc + (Number(r.total_amount) || 0), 0)
+
       setMetrics([
-        { label: 'Tickets válidos', value: String(ticketsCount.count ?? 0) },
-        { label: 'Gastos', value: String(expensesCount.count ?? 0) },
+        { label: 'Gastos registrados', value: String(expensesCount.count ?? 0) },
+        { label: 'Total importe gastos', value: `${sum.toFixed(2)} EUR` },
       ])
       setLoading(false)
     }
@@ -50,7 +52,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <div className="text-sm text-zinc-500">Tickets Cotepa</div>
+        <div className="text-sm text-zinc-500">Gastos Cotepa</div>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">{title}</h1>
       </div>
 
@@ -78,10 +80,9 @@ export default function Dashboard() {
       <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
         <div className="text-sm font-medium text-zinc-900">Siguiente paso</div>
         <div className="mt-2 text-sm text-zinc-600">
-          Configura módulos, roles y vistas desde Admin. Después, empieza a registrar tickets y gastos con adjuntos.
+          Configura módulos, roles y vistas desde Admin. Después, empieza a registrar gastos y adjuntar la foto del ticket de caja.
         </div>
       </div>
     </div>
   )
 }
-

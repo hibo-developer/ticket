@@ -10,3 +10,8 @@ export async function sha256HexFile(file: File) {
   const buf = await file.arrayBuffer()
   return sha256Hex(buf)
 }
+
+export async function sha256HexBlob(blob: Blob) {
+  const buf = await blob.arrayBuffer()
+  return sha256Hex(buf)
+}

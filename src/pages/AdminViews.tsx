@@ -6,7 +6,7 @@ import { viewLayoutSchema } from '@/core/views/schema'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-type Entity = 'tickets' | 'expenses'
+type Entity = 'expenses'
 type ViewType = 'list' | 'form'
 
 function toViewKey(entity: Entity, viewType: ViewType) {
@@ -15,7 +15,7 @@ function toViewKey(entity: Entity, viewType: ViewType) {
 
 export default function AdminViews() {
   const { profile } = useAuth()
-  const [entity, setEntity] = useState<Entity>('tickets')
+  const [entity, setEntity] = useState<Entity>('expenses')
   const [viewType, setViewType] = useState<ViewType>('list')
   const viewKey = useMemo(() => toViewKey(entity, viewType), [entity, viewType])
 
@@ -129,7 +129,6 @@ export default function AdminViews() {
               onChange={(e) => setEntity(e.target.value as Entity)}
               disabled={busy}
             >
-              <option value="tickets">Tickets</option>
               <option value="expenses">Gastos</option>
             </select>
           </label>
@@ -174,4 +173,3 @@ export default function AdminViews() {
     </div>
   )
 }
-

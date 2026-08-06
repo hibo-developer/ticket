@@ -7,8 +7,6 @@ import Setup from '@/pages/Setup'
 import ExpenseDetail from '@/modules/expenses/pages/ExpenseDetail'
 import ExpensesList from '@/modules/expenses/pages/ExpensesList'
 import Reports from '@/modules/reports/pages/Reports'
-import TicketDetail from '@/modules/tickets/pages/TicketDetail'
-import TicketsList from '@/modules/tickets/pages/TicketsList'
 import { AllPermissions } from '@/core/rbac/permissions'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -70,6 +68,7 @@ const supabaseMock = vi.hoisted(() => {
       limit: () => q,
       insert: () => Promise.resolve({ error: null, data: null }),
       upsert: () => Promise.resolve({ error: null, data: null }),
+      update: () => q,
       delete: () => q,
       single: () => Promise.resolve(result.single ?? { data: null, error: null }),
       maybeSingle: () => Promise.resolve(result.single ?? { data: null, error: null }),
@@ -90,23 +89,6 @@ const supabaseMock = vi.hoisted(() => {
       getUser: vi.fn().mockResolvedValue({ data: { user: authStateRef.current.session.user } }),
     },
     from: (table: string) => {
-      if (table === 'tickets') {
-        return builder({
-          single: {
-            data: {
-              id: 't1',
-              title: 'Ticket demo',
-              status: 'draft',
-              ticket_date: null,
-              amount: 10,
-              currency: 'EUR',
-              vendor: 'Proveedor',
-            },
-            error: null,
-          },
-          list: { data: [], error: null, count: 0 },
-        })
-      }
       if (table === 'expenses') {
         return builder({
           single: {
@@ -116,12 +98,22 @@ const supabaseMock = vi.hoisted(() => {
               expense_date: '2026-01-01',
               total_amount: 10,
               currency: 'EUR',
-              category: 'Transporte',
+              category: 'comida',
+              vehicle_plate: null,
             },
             error: null,
           },
           list: { data: [], error: null, count: 0 },
         })
+      }
+      if (table === 'expense_files') {
+        return builder({
+          single: { data: null, error: null },
+          list: { data: [], error: null, count: 0 },
+        })
+      }
+      if (table === 'ui_views' || table === 'module_toggles' || table === 'roles' || table === 'role_permissions') {
+        return builder({ single: { data: null, error: null }, list: { data: [], error: null, count: 0 } })
       }
       return builder({ list: { data: [], error: null, count: 0 } })
     },
@@ -144,7 +136,7 @@ describe('smoke', () => {
         <Login />
       </MemoryRouter>,
     )
-    expect(screen.getByText('Acceso seguro a tickets y gastos')).toBeInTheDocument()
+    expect(screen.getByText('Acceso seguro a gestión de gastos')).toBeInTheDocument()
   })
 
   it('muestra un mensaje claro cuando Supabase rechaza el login por configuración de auth', async () => {
@@ -363,7 +355,7 @@ describe('smoke', () => {
         <Dashboard />
       </MemoryRouter>,
     )
-    expect(screen.getByText('Tickets Cotepa')).toBeInTheDocument()
+    expect(screen.getByText('Gastos Cotepa')).toBeInTheDocument()
   })
 
   it('renderiza Admin', async () => {
@@ -381,16 +373,14 @@ describe('smoke', () => {
 
   it('renderiza módulos', () => {
     render(
-      <MemoryRouter initialEntries={['/tickets']}>
+      <MemoryRouter initialEntries={['/gastos']}>
         <Routes>
-          <Route path="/tickets" element={<TicketsList />} />
-          <Route path="/tickets/:id" element={<TicketDetail />} />
           <Route path="/gastos" element={<ExpensesList />} />
           <Route path="/gastos/:id" element={<ExpenseDetail />} />
           <Route path="/informes" element={<Reports />} />
         </Routes>
       </MemoryRouter>,
     )
-    expect(screen.getByText('Tickets y recibos')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Gastos' })).toBeInTheDocument()
   })
 })

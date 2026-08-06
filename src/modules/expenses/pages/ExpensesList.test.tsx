@@ -17,13 +17,26 @@ vi.mock('@/core/rbac/usePermissions', () => ({
 }))
 
 const insert = vi.fn().mockResolvedValue({ error: null })
+
 const q: any = {
   select: () => q,
   eq: () => q,
   order: () => q,
   limit: () => q,
   maybeSingle: () => Promise.resolve({ data: null, error: null }),
-  insert,
+  insert: (...args: any[]) => {
+    const r = insert(...args)
+    return {
+      select: () => ({
+        single: () =>
+          Promise.resolve({
+            data: { id: 'e-new' },
+            error: null,
+          }),
+      }),
+      then: (resolve: any, reject: any) => Promise.resolve({ data: [{ id: 'e-new' }], error: null }).then(resolve, reject),
+    }
+  },
   then: (resolve: any, reject: any) => Promise.resolve({ data: [], error: null }).then(resolve, reject),
 }
 
@@ -40,8 +53,9 @@ describe('ExpensesList', () => {
       </MemoryRouter>,
     )
 
-    await user.type(screen.getByPlaceholderText('Importe'), '12.5')
-    await user.click(screen.getByRole('button', { name: 'Crear' }))
+    await user.selectOptions(screen.getByLabelText('Tipo de gasto'), 'comida')
+    await user.type(screen.getByLabelText('Importe'), '12.5')
+    await user.click(screen.getByRole('button', { name: 'Crear gasto' }))
     expect(insert).toHaveBeenCalled()
   })
 })

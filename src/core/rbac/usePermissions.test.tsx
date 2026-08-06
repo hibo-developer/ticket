@@ -18,7 +18,7 @@ vi.mock('@/core/auth/supabaseClient', () => {
       Promise.resolve({
         data: [
           {
-            roles: { role_permissions: [{ permission_key: Permission.TicketsRead }] },
+            roles: { role_permissions: [{ permission_key: Permission.ExpensesRead }] },
           },
         ],
         error: null,
@@ -29,7 +29,7 @@ vi.mock('@/core/auth/supabaseClient', () => {
 
 function Probe() {
   const { loading, permissions } = usePermissions()
-  return <div>{loading ? 'loading' : permissions.has(Permission.TicketsRead) ? 'ok' : 'no'}</div>
+  return <div>{loading ? 'loading' : permissions.has(Permission.ExpensesRead) ? 'ok' : 'no'}</div>
 }
 
 describe('usePermissions', () => {

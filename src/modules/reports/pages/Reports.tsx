@@ -23,15 +23,16 @@ export default function Reports() {
       setLoading(true)
       setError(null)
 
-      const [ticketsCount, draftTickets, expensesSum] = await Promise.all([
-        supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id).is('deleted_at', null),
-        supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id).is('deleted_at', null).eq('status', 'draft'),
+      const [expensesCount, draftCount, approvedCount, expensesSum] = await Promise.all([
+        supabase.from('expenses').select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id),
+        supabase.from('expenses').select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id).eq('state', 'draft'),
+        supabase.from('expenses').select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id).eq('state', 'approved'),
         supabase.from('expenses').select('total_amount').eq('org_id', profile.org_id),
       ])
 
       if (cancelled) return
 
-      if (ticketsCount.error || draftTickets.error || expensesSum.error) {
+      if (expensesCount.error || draftCount.error || approvedCount.error || expensesSum.error) {
         setError('No se pudieron cargar los datos del informe.')
         setCards([])
         setLoading(false)
@@ -41,9 +42,10 @@ export default function Reports() {
       const sum = (expensesSum.data ?? []).reduce((acc: number, r: any) => acc + (Number(r.total_amount) || 0), 0)
 
       setCards([
-        { label: 'Tickets totales', value: String(ticketsCount.count ?? 0) },
-        { label: 'Tickets en borrador', value: String(draftTickets.count ?? 0) },
-        { label: 'Total gastos', value: `${sum.toFixed(2)} EUR` },
+        { label: 'Gastos totales', value: String(expensesCount.count ?? 0) },
+        { label: 'Gastos pendientes', value: String(draftCount.count ?? 0) },
+        { label: 'Gastos aprobados', value: String(approvedCount.count ?? 0) },
+        { label: 'Total importe', value: `${sum.toFixed(2)} EUR` },
       ])
       setLoading(false)
     }
@@ -59,15 +61,15 @@ export default function Reports() {
     <div className="space-y-6">
       <div>
         <div className="text-sm text-zinc-500">Informes</div>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">Informes</h1>
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">Informes de gastos</h1>
       </div>
 
       {error ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        {(loading ? [0, 1, 2] : cards).map((c: any, idx: number) => (
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {(loading ? [0, 1, 2, 3] : cards).map((c: any, idx: number) => (
           <div key={idx} className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
             {loading ? (
               <div className="space-y-3">
@@ -91,4 +93,3 @@ export default function Reports() {
     </div>
   )
 }
-

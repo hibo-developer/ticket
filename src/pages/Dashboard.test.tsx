@@ -6,46 +6,36 @@ vi.mock('@/core/auth/AuthContext', () => ({
   useAuth: () => ({ profile: { org_id: 'o1', full_name: 'Usuario' } }),
 }))
 
-const ticketsIs = vi.hoisted(() => vi.fn())
-const ticketsNeq = vi.hoisted(() => vi.fn())
+const expensesEq = vi.hoisted(() => vi.fn())
 
 vi.mock('@/core/auth/supabaseClient', () => {
-  const ticketsQuery: any = {
-    select: () => ticketsQuery,
-    eq: () => ticketsQuery,
-    is: (...args: any[]) => {
-      ticketsIs(...args)
-      return ticketsQuery
-    },
-    neq: (...args: any[]) => {
-      ticketsNeq(...args)
-      return ticketsQuery
-    },
-    then: (resolve: any, reject: any) =>
-      Promise.resolve({ count: 4, data: [], error: null }).then(resolve, reject),
-  }
-
   const expensesQuery: any = {
     select: () => expensesQuery,
-    eq: () => expensesQuery,
+    eq: (...args: any[]) => {
+      expensesEq(...args)
+      return expensesQuery
+    },
     then: (resolve: any, reject: any) =>
-      Promise.resolve({ count: 2, data: [], error: null }).then(resolve, reject),
+      Promise.resolve({
+        data: [
+          { total_amount: 10.5, state: 'approved' },
+          { total_amount: 20, state: 'pending' },
+        ],
+        error: null,
+        count: 2,
+      }).then(resolve, reject),
   }
 
   return {
-    supabase: {
-      from: (table: string) => (table === 'tickets' ? ticketsQuery : expensesQuery),
-    },
+    supabase: { from: (table: string) => expensesQuery },
   }
 })
 
 describe('Dashboard', () => {
-  it('contabiliza solo tickets validos', async () => {
+  it('muestra métricas de gastos', async () => {
     render(<Dashboard />)
 
-    expect(await screen.findByText('Tickets válidos')).toBeInTheDocument()
-    expect(screen.getByText('4')).toBeInTheDocument()
-    expect(ticketsIs).toHaveBeenCalledWith('deleted_at', null)
-    expect(ticketsNeq).toHaveBeenCalledWith('status', 'draft')
+    expect(await screen.findByText('Gastos Cotepa')).toBeInTheDocument()
+    expect(screen.getByText('30.50 EUR')).toBeInTheDocument()
   })
 })

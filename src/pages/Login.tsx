@@ -170,8 +170,8 @@ export default function Login() {
       <div className="mx-auto flex min-h-screen w-full max-w-6xl items-center px-6">
         <div className="grid w-full grid-cols-1 gap-10 md:grid-cols-2">
           <div className="flex flex-col justify-center">
-            <div className="text-sm text-zinc-400">Tickets Cotepa</div>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight">Acceso seguro a tickets y gastos</h1>
+            <div className="text-sm text-zinc-400">Gastos Cotepa</div>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight">Acceso seguro a gestión de gastos</h1>
             <p className="mt-4 max-w-md text-sm leading-6 text-zinc-300">
               Una PWA empresarial modular con control de permisos, auditoría y descargas seguras de adjuntos.
             </p>

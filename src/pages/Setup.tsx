@@ -49,7 +49,7 @@ export default function Setup() {
     <div className="min-h-screen bg-zinc-50">
       <div className="mx-auto flex min-h-screen max-w-xl items-center px-6">
         <div className="w-full rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-          <div className="text-sm text-zinc-500">Tickets Cotepa</div>
+          <div className="text-sm text-zinc-500">Gastos Cotepa</div>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">Configuración inicial</h1>
           <div className="mt-2 text-sm text-zinc-600">
             Crea la organización inicial y asigna tu usuario como administrador.
