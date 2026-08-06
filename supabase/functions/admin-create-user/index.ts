@@ -43,10 +43,6 @@ function validUsername(u: string) {
   return true
 }
 
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms))
-}
-
 Deno.serve(async (req) => {
   const reqOrigin = req.headers.get('Origin')
   const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') ?? '')
@@ -70,7 +66,8 @@ Deno.serve(async (req) => {
 
     if (!supabaseUrl || !anonKey || !serviceKey)
       return json(corsOrigin, 500, {
-        error: 'Falta configuración de Supabase (SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY).',
+        error:
+          'Falta configuración de Supabase. Ve a Dashboard → Edge Functions → Secrets y define SUPABASE_URL, SUPABASE_ANON_KEY y SERVICE_ROLE_KEY.',
       })
 
     const authHeader = req.headers.get('Authorization') ?? ''
@@ -79,7 +76,12 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: authHeader } },
     })
 
-    const { data: userData } = await userClient.auth.getUser()
+    const { data: userData, error: whoamiErr } = await userClient.auth.getUser()
+    if (whoamiErr)
+      return json(corsOrigin, 401, {
+        error: `Token inválido o expirado: ${whoamiErr.message}`,
+      })
+
     const userId = userData.user?.id
     if (!userId) return json(corsOrigin, 401, { error: 'No autenticado.' })
 
@@ -90,10 +92,15 @@ Deno.serve(async (req) => {
       .single()
 
     if (meError || !me?.org_id)
-      return json(corsOrigin, 403, { error: 'No autorizado (perfil no encontrado).' })
-    if (!me.active) return json(corsOrigin, 403, { error: 'Cuenta desactivada.' })
+      return json(corsOrigin, 403, {
+        error:
+          'No autorizado: tu perfil no existe o no perteneces a una organización. Crea una organización primero con Setup.',
+      })
+    if (!me.active) return json(corsOrigin, 403, { error: 'Tu cuenta está desactivada.' })
     if (me.app_role !== 'admin')
-      return json(corsOrigin, 403, { error: 'No autorizado (no admin).' })
+      return json(corsOrigin, 403, {
+        error: 'No autorizado: necesitas app_role=admin en tu perfil.',
+      })
 
     let input: Input
     try {
@@ -113,11 +120,11 @@ Deno.serve(async (req) => {
     if (!email || !email.includes('@')) return json(corsOrigin, 400, { error: 'Email inválido.' })
     if (!validPassword(tempPassword))
       return json(corsOrigin, 400, {
-        error: 'Contraseña temporal débil (mín. 10 chars, letras + números).',
+        error: 'Contraseña temporal débil: mínimo 10 caracteres, letras + números.',
       })
     if (username && !validUsername(username))
       return json(corsOrigin, 400, {
-        error: 'Nombre de usuario inválido (3-32, letras/números/._-).',
+        error: 'Nombre de usuario inválido (3-32, letras / números / . _ -).',
       })
 
     const availability = await userClient.rpc('admin_check_user_availability', {
@@ -127,7 +134,7 @@ Deno.serve(async (req) => {
 
     if (availability.error)
       return json(corsOrigin, 500, {
-        error: `admin_check_user_availability falló: ${availability.error.message}`,
+        error: `admin_check_user_availability falló. Aplica la migración 20260806_000011_bootstrap_prereqs_admin_create_user.sql en SQL Editor. Detalle: ${availability.error.message}`,
       })
 
     const emailTaken = Boolean((availability.data as any)?.email_taken)
@@ -149,7 +156,7 @@ Deno.serve(async (req) => {
         .in('id', roleIds)
       if (roleRes.error)
         return json(corsOrigin, 500, {
-          error: `Roles lookup falló: ${roleRes.error.message}`,
+          error: `Roles lookup falló: ${roleRes.error.message}. Revisa que existan roles en la tabla roles de tu organización y que tengan org_id=${me.org_id}.`,
         })
       validRoleIds = Array.from(new Set((roleRes.data ?? []).map((r: any) => String(r.id))))
       if (validRoleIds.length !== roleIds.length)
@@ -166,37 +173,38 @@ Deno.serve(async (req) => {
         org_id: me.org_id,
         full_name: fullName,
         username: username || null,
+        app_role: appRole,
         invited_by: userId,
       },
     })
 
     if (created.error)
       return json(corsOrigin, 500, {
-        error: `No se pudo crear auth user: ${created.error.message}`,
+        error: `No se pudo crear auth user: ${created.error.message}. Causas comunes: email duplicado en auth.users (prueba otro email), o el dominio está bloqueado en Auth > Rate limits.`,
       })
 
     const newUserId = created.data.user?.id
     if (!newUserId) return json(corsOrigin, 500, { error: 'Auth admin no devolvió user_id.' })
 
-    let profileReady = false
-    for (let i = 0; i < 10; i++) {
-      const upd = await serviceClient
-        .from('profiles')
-        .update({
+    // Ahora usamos UPSERT con service_role (salta RLS).
+    // - Si el trigger on_auth_user_created insertó perfil → do update.
+    // - Si el trigger NO existe o tarda demasiado → insertamos aquí mismo con org_id garantizado.
+    const upsertRes = await serviceClient
+      .from('profiles')
+      .upsert(
+        {
+          id: newUserId,
+          org_id: me.org_id,
           full_name: fullName,
           username: username || null,
           app_role: appRole,
-        })
-        .eq('id', newUserId)
-      if (!upd.error) {
-        profileReady = true
-        break
-      }
-      await sleep(250)
-    }
-    if (!profileReady)
+          active: true,
+        },
+        { onConflict: 'id', ignoreDuplicates: false },
+      )
+    if (upsertRes.error)
       return json(corsOrigin, 500, {
-        error: 'No se pudo actualizar el perfil de usuario tras 10 intentos (trigger profiles?).',
+        error: `profiles UPSERT falló: ${upsertRes.error.message}. Asegúrate de haber aplicado la migración 20260806_000011 (agrega username columna + trigger handle_new_user).`,
       })
 
     if (validRoleIds.length > 0) {
@@ -236,7 +244,7 @@ Deno.serve(async (req) => {
     return json(corsOrigin, 200, { ok: true, user_id: newUserId })
   } catch (topErr: any) {
     const msg = topErr?.message ?? String(topErr ?? 'error desconocido')
-    const stack = topErr?.stack ? String(topErr.stack).slice(0, 300) : undefined
+    const stack = topErr?.stack ? String(topErr.stack).slice(0, 500) : undefined
     return json(corsOrigin, 500, {
       error: 'admin-create-user EXCEPTION (top-level)',
       detail: msg,
